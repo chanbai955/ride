@@ -29,8 +29,15 @@
         .header-info { display: flex; flex-direction: column; }
         #fullDate { font-size: 1.1rem; font-weight: 900; }
         #liveClock { font-size: 1rem; margin-top: 5px; font-weight: 800; opacity: 0.8; }
-        .title-container { flex: 1; display: flex; flex-direction: column; align-items: flex-start; padding-left: 30px; }
         
+        .title-container { 
+            flex: 1; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: flex-start; 
+            padding-left: 15px; 
+        }
+
         .app-title { 
             color: var(--neon-green); 
             font-size: 0.9rem; 
@@ -40,7 +47,16 @@
             display: flex; 
             align-items: center; 
         }
-        
+
+        .app-subtitle { 
+            color: #fff; 
+            font-size: 0.55rem; 
+            letter-spacing: 3px; 
+            opacity: 0.7; 
+            margin-left: 28px; 
+            transition: color 0.5s ease, text-shadow 0.5s ease;
+        }
+
         /* BIKE ANIMATION */
         @keyframes bikePedal {
             0% { transform: translateY(0) rotate(0deg); }
@@ -53,8 +69,6 @@
             display: inline-block;
             transform-origin: bottom center;
         }
-
-        .app-subtitle { color: #fff; font-size: 0.55rem; letter-spacing: 3px; opacity: 0.7; }
 
         /* MAIN DISPLAY & MAP */
         .main-display { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 25px; position: relative; }
@@ -88,7 +102,6 @@
 
         /* BUTTONS */
         .button-row { display: flex; width: 100%; justify-content: space-around; align-items: center; }
-        
         .new-ride-circle { 
             width: 55px; height: 55px; 
             background: linear-gradient(145deg, #1b5e20, #32D74B); 
@@ -96,10 +109,7 @@
             display: flex; flex-direction: column; justify-content: center; align-items: center; 
             cursor: pointer; text-align: center; overflow: hidden;
         }
-        .new-ride-circle span { 
-            color: white; font-weight: 900; line-height: 1; 
-            pointer-events: none; display: block; width: 100%;
-        }
+        .new-ride-circle span { color: white; font-weight: 900; line-height: 1; pointer-events: none; display: block; width: 100%; }
 
         .btn { display: flex; align-items: center; justify-content: center; border-radius: 50%; border: none; cursor: pointer; }
         .btn-main { width: 85px; height: 85px; }
@@ -116,7 +126,6 @@
         .chart-wrapper { margin: 15px 25px; padding: 20px 10px 35px 10px; background: #121212; border-radius: 15px; border: 1px solid #333; overflow-x: auto; white-space: nowrap; }
         .chart-container { display: inline-flex; align-items: flex-end; gap: 15px; min-width: 100%; height: 120px; }
         .chart-bar { flex: 0 0 45px; background: var(--neon-green); border-radius: 6px 6px 0 0; position: relative; display: flex; align-items: flex-end; justify-content: center; }
-        
         .chart-bar span.bar-val { writing-mode: vertical-rl; transform: rotate(180deg); color: var(--accent-blue); font-size: 0.6rem; font-weight: 900; margin-bottom: 8px; }
         .chart-bar span.bar-date { position: absolute; bottom: -25px; color: #888; font-size: 0.6rem; font-weight: 800; }
 
@@ -143,8 +152,8 @@
         </div>
         <div class="title-container">
             <div class="app-title">
-                <span id="bikeIcon" class="material-icons-round" style="margin-right: 8px; font-size: 1.2rem;">directions_bike</span>
-                Chanthiran
+                <span id="bikeIcon" class="material-icons-round" style="margin-right: 8px; font-size: 1.2rem; display: inline-block;">directions_bike</span>
+                <span>Chanthiran</span>
             </div>
             <div class="app-subtitle">RIDE TRACKER</div>
         </div>
@@ -240,7 +249,7 @@
     let targetDate = localStorage.getItem('chan_target_date') || "";
     let rideLocation = localStorage.getItem('chan_ride_loc') || "NOT SET";
     let watchID, timerInterval, sessionDistance = 0, totalSeconds = 0, lastCoords = null, lastPointTime = 0, lastSpokenDistance = 0, db;
-    let isPaused = false, wakeLock = null;
+    let isPaused = false;
     
     let map, routeLine, currentMarker, hMap, hRouteLine, ridePath = [];
 
@@ -307,7 +316,7 @@
 
     function start() {
         document.getElementById('map').style.display = 'block';
-        document.getElementById('bikeIcon').classList.add('bike-riding'); // Start animation
+        document.getElementById('bikeIcon').classList.add('bike-riding'); 
         
         if (!isPaused) { speak("riding started"); lastPointTime = Date.now(); ridePath = []; }
         else { speak("Resumed"); }
@@ -321,11 +330,27 @@
                 const totalMin = (totalSeconds / 60) / sessionDistance;
                 paceEl.innerText = totalMin < 35 ? `${Math.floor(totalMin)}'${Math.floor((totalMin % 1) * 60).toString().padStart(2, '0')}"` : "0'00\"";
                 
-                // ADJUST BIKE SPEED
+                // DYNAMIC BIKE & SUBTITLE COLOR LOGIC
                 const bike = document.getElementById('bikeIcon');
-                if (totalMin < 5) bike.style.animationDuration = '0.3s';
-                else if (totalMin < 15) bike.style.animationDuration = '0.6s';
-                else bike.style.animationDuration = '1.2s';
+                const subtitle = document.querySelector('.app-subtitle');
+
+                if (totalMin < 3) { 
+                    bike.style.animationDuration = '0.2s';
+                    subtitle.style.color = 'var(--danger-red)';
+                    subtitle.style.textShadow = '0 0 8px var(--danger-red)';
+                } else if (totalMin < 6) { 
+                    bike.style.animationDuration = '0.4s';
+                    subtitle.style.color = 'var(--accent-blue)';
+                    subtitle.style.textShadow = '0 0 8px var(--accent-blue)';
+                } else if (totalMin < 12) { 
+                    bike.style.animationDuration = '0.7s';
+                    subtitle.style.color = 'var(--neon-green)';
+                    subtitle.style.textShadow = 'none';
+                } else { 
+                    bike.style.animationDuration = '1.2s';
+                    subtitle.style.color = '#fff';
+                    subtitle.style.textShadow = 'none';
+                }
             }
         }, 1000);
 
@@ -360,7 +385,9 @@
             navigator.geolocation.clearWatch(watchID); 
             isPaused = true; 
             startIcon.innerText = "play_arrow"; 
-            document.getElementById('bikeIcon').classList.remove('bike-riding'); // Stop animation
+            document.getElementById('bikeIcon').classList.remove('bike-riding');
+            document.querySelector('.app-subtitle').style.color = '#fff';
+            document.querySelector('.app-subtitle').style.textShadow = 'none';
             speak("Paused"); 
         }
         else start();
@@ -369,7 +396,6 @@
     stopBtn.onclick = () => {
         clearInterval(timerInterval); 
         navigator.geolocation.clearWatch(watchID);
-        document.getElementById('bikeIcon').classList.remove('bike-riding'); // Stop animation
         totalDistance += sessionDistance; localStorage.setItem('chan_accumulated_km', totalDistance);
         const tx = db.transaction("rides", "readwrite");
         tx.objectStore("rides").add({ 

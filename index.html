@@ -254,7 +254,7 @@
     
     let map, routeLine, currentMarker, hMap, hRouteLine, ridePath = [];
 
-    const dbReq = indexedDB.open("rideProEliteDB", 2);
+    const dbReq = indexedDB.open("rideProEliteDB", 3);
     dbReq.onupgradeneeded = (e) => { 
         db = e.target.result; 
         if(!db.objectStoreNames.contains("rides")) db.createObjectStore("rides", { keyPath: "id", autoIncrement: true });

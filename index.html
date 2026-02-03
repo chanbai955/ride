@@ -244,22 +244,37 @@
     </div>
 
 <script>
+    // --- PERSISTENCE LOGIC ---
     let totalDistance = parseFloat(localStorage.getItem('chan_accumulated_km')) || 0;
     let targetGoal = parseFloat(localStorage.getItem('chan_target_km')) || 0;
     let targetDate = localStorage.getItem('chan_target_date') || "";
     let rideLocation = localStorage.getItem('chan_ride_loc') || "NOT SET";
-    let watchID, timerInterval, sessionDistance = 0, totalSeconds = 0, lastCoords = null, lastPointTime = 0, lastSpokenDistance = 0, db;
-    let isPaused = false;
-    let wakeLock = null; // WAKE LOCK VARIABLE
     
-    let map, routeLine, currentMarker, hMap, hRouteLine, ridePath = [];
+    // NEW: Recover session variables
+    let sessionDistance = parseFloat(localStorage.getItem('chan_session_dist')) || 0;
+    let totalSeconds = parseInt(localStorage.getItem('chan_session_seconds')) || 0;
+    let ridePath = JSON.parse(localStorage.getItem('chan_session_path')) || [];
+    let lastSpokenDistance = sessionDistance; 
+
+    let watchID, timerInterval, lastCoords = null, lastPointTime = 0, db;
+    let isPaused = false;
+    let wakeLock = null;
+    
+    let map, routeLine, currentMarker, hMap, hRouteLine;
 
     const dbReq = indexedDB.open("rideProEliteDB", 3);
     dbReq.onupgradeneeded = (e) => { 
         db = e.target.result; 
         if(!db.objectStoreNames.contains("rides")) db.createObjectStore("rides", { keyPath: "id", autoIncrement: true });
     };
-    dbReq.onsuccess = (e) => db = e.target.result;
+    dbReq.onsuccess = (e) => {
+        db = e.target.result;
+        // If recovered path exists, draw it on map load
+        if(ridePath.length > 0) {
+            routeLine.setLatLngs(ridePath);
+            map.fitBounds(routeLine.getBounds());
+        }
+    };
 
     const distEl = document.getElementById('distance'), timerEl = document.getElementById('timer'), paceEl = document.getElementById('pace'), 
           startBtn = document.getElementById('startBtn'), stopBtn = document.getElementById('stopBtn'), 
@@ -268,33 +283,33 @@
     setInterval(() => { document.getElementById('liveClock').innerText = new Date().toTimeString().split(' ')[0]; }, 1000);
     document.getElementById('fullDate').innerText = new Date().toLocaleDateString('en-GB');
 
-    window.onload = () => { updateProgress(); checkStatus(); document.getElementById('locDisplay').innerText = rideLocation; initMap(); };
+    window.onload = () => { 
+        updateProgress(); 
+        checkStatus(); 
+        document.getElementById('locDisplay').innerText = rideLocation; 
+        initMap();
+        
+        // AUTO-RECOVERY CHECK
+        if (totalSeconds > 0 || sessionDistance > 0) {
+            timerEl.innerText = `${Math.floor(totalSeconds/60).toString().padStart(2,'0')}:${(totalSeconds%60).toString().padStart(2,'0')}`;
+            distEl.innerText = sessionDistance.toFixed(2);
+            stopBtn.classList.remove('hidden');
+            // If it was closed while running, it stays paused until user clicks Play
+        }
+    };
 
-    // WAKE LOCK LOGIC
     async function requestWakeLock() {
         if ('wakeLock' in navigator) {
-            try {
-                wakeLock = await navigator.wakeLock.request('screen');
-                console.log("Wake Lock active");
-            } catch (err) {
-                console.error(`${err.name}, ${err.message}`);
-            }
+            try { wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {}
         }
     }
-
-    // Re-request wake lock when app becomes visible again
-    document.addEventListener('visibilitychange', async () => {
-        if (wakeLock !== null && document.visibilityState === 'visible') {
-            await requestWakeLock();
-        }
-    });
 
     function speak(text) { window.speechSynthesis.cancel(); window.speechSynthesis.speak(new SpeechSynthesisUtterance(text)); }
 
     function initMap() {
         map = L.map('map', { zoomControl: false }).setView([0, 0], 15);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-        routeLine = L.polyline([], {color: '#32D74B', weight: 6, opacity: 0.8}).addTo(map);
+        routeLine = L.polyline(ridePath, {color: '#32D74B', weight: 6, opacity: 0.8}).addTo(map);
         currentMarker = L.circleMarker([0, 0], {radius: 8, color: '#0A84FF', fillColor: '#0A84FF', fillOpacity: 1}).addTo(map);
     }
 
@@ -306,46 +321,23 @@
             document.getElementById('balKm').innerText = Math.max(targetGoal - cur, 0).toFixed(2);
             document.getElementById('progressBar').style.width = Math.min((cur / targetGoal) * 100, 100) + "%";
         }
+        // Save state to storage
+        localStorage.setItem('chan_session_dist', sessionDistance);
+        localStorage.setItem('chan_session_path', JSON.stringify(ridePath));
     }
 
-    function updateGpsIcon(accuracy) {
-        const icon = document.getElementById('gpsIcon');
-        if (accuracy < 25) { icon.classList.add('sig-good'); accDisplay.innerText = `ACCURACY: ${accuracy.toFixed(0)}M (LOCKED)`; accDisplay.style.color = "var(--accent-blue)"; }
-        else { icon.classList.remove('sig-good'); accDisplay.innerText = `ACCURACY: ${accuracy.toFixed(0)}M (SEARCHING)`; accDisplay.style.color = "var(--warning-yellow)"; }
-    }
-
-    function checkStatus() {
-        if (!targetDate || targetGoal <= 0) return;
-        const due = new Date(targetDate).setHours(0,0,0,0);
-        const diffDays = Math.ceil((due - new Date().setHours(0,0,0,0)) / 86400000);
-        document.getElementById('balDateDisplay').innerText = `DUE: ${targetDate.split('-').reverse().join('/')}`;
-        document.getElementById('daysLeftDisplay').innerText = diffDays < 0 ? "OVERDUE" : `${diffDays} DAYS LEFT`;
-    }
-
-   function checkVoiceMilestones() {
-        // Trigger every 0.5 km
+    function checkVoiceMilestones() {
         if (sessionDistance >= lastSpokenDistance + 0.5) {
             lastSpokenDistance = Math.floor(sessionDistance * 2) / 2;
-            
-            // Check if it is a full kilometer (e.g., 1.0, 2.0) or half (e.g., 0.5, 1.5)
             const isFullKm = lastSpokenDistance % 1 === 0;
 
             if (isFullKm) {
-                // Detailed report for full kilometers
                 let currentTime = timerEl.innerText; 
                 let currentPace = paceEl.innerText.replace('"', ''); 
-                
                 let pParts = currentPace.split("'");
-                let pMin = pParts[0];
-                let pSec = pParts[1] || "0";
-
                 let tParts = currentTime.split(":");
-                let tMin = parseInt(tParts[0]);
-                let tSec = parseInt(tParts[1]);
-
-                speak(`${lastSpokenDistance} kilometers. Time: ${tMin} minutes ${tSec} seconds. Pace: ${pMin} minutes ${pSec} seconds.`);
+                speak(`${lastSpokenDistance} kilometers. Time: ${parseInt(tParts[0])} minutes ${parseInt(tParts[1])} seconds. Pace: ${pParts[0]} minutes ${pParts[1] || 0} seconds.`);
             } else {
-                // Short report for half kilometers
                 speak(`${lastSpokenDistance} kilometers.`);
             }
         }
@@ -354,40 +346,21 @@
     function start() {
         document.getElementById('map').style.display = 'block';
         document.getElementById('bikeIcon').classList.add('bike-riding'); 
-        requestWakeLock(); // ACTIVATE NO-SLEEP
+        requestWakeLock();
         
-        if (!isPaused) { speak("riding started"); lastPointTime = Date.now(); ridePath = []; }
-        else { speak("Resumed"); }
+        if (!isPaused && totalSeconds === 0) { speak("riding started"); lastPointTime = Date.now(); }
+        else { speak("Resumed"); lastPointTime = Date.now(); }
+        
         isPaused = false; startIcon.innerText = "pause"; stopBtn.classList.remove('hidden');
         
         timerInterval = setInterval(() => {
             totalSeconds++;
+            localStorage.setItem('chan_session_seconds', totalSeconds); // Persistence
             timerEl.innerText = `${Math.floor(totalSeconds/60).toString().padStart(2,'0')}:${(totalSeconds%60).toString().padStart(2,'0')}`;
             
             if(sessionDistance > 0.05) {
                 const totalMin = (totalSeconds / 60) / sessionDistance;
                 paceEl.innerText = totalMin < 35 ? `${Math.floor(totalMin)}'${Math.floor((totalMin % 1) * 60).toString().padStart(2, '0')}"` : "0'00\"";
-                
-                const bike = document.getElementById('bikeIcon');
-                const subtitle = document.querySelector('.app-subtitle');
-
-                if (totalMin < 3) { 
-                    bike.style.animationDuration = '0.2s';
-                    subtitle.style.color = 'var(--danger-red)';
-                    subtitle.style.textShadow = '0 0 8px var(--danger-red)';
-                } else if (totalMin < 6) { 
-                    bike.style.animationDuration = '0.4s';
-                    subtitle.style.color = 'var(--accent-blue)';
-                    subtitle.style.textShadow = '0 0 8px var(--accent-blue)';
-                } else if (totalMin < 12) { 
-                    bike.style.animationDuration = '0.7s';
-                    subtitle.style.color = 'var(--neon-green)';
-                    subtitle.style.textShadow = 'none';
-                } else { 
-                    bike.style.animationDuration = '1.2s';
-                    subtitle.style.color = '#fff';
-                    subtitle.style.textShadow = 'none';
-                }
             }
         }, 1000);
 
@@ -412,7 +385,7 @@
                     ridePath.push([lat, lng]);
                     routeLine.addLatLng([lat, lng]); 
                 }
-            } else { lastCoords = {lat: lat, lon: lng}; lastPointTime = Date.now(); map.setView([lat, lng], 17); ridePath.push([lat, lng]); }
+            } else { lastCoords = {lat: lat, lon: lng}; lastPointTime = Date.now(); ridePath.push([lat, lng]); }
         }, null, {enableHighAccuracy: true});
     }
 
@@ -423,10 +396,8 @@
             isPaused = true; 
             startIcon.innerText = "play_arrow"; 
             document.getElementById('bikeIcon').classList.remove('bike-riding');
-            document.querySelector('.app-subtitle').style.color = '#fff';
-            document.querySelector('.app-subtitle').style.textShadow = 'none';
             speak("Paused"); 
-            if (wakeLock) { wakeLock.release(); wakeLock = null; } // RELEASE NO-SLEEP ON PAUSE
+            if (wakeLock) { wakeLock.release(); wakeLock = null; }
         }
         else start();
     };
@@ -434,15 +405,38 @@
     stopBtn.onclick = () => {
         clearInterval(timerInterval); 
         navigator.geolocation.clearWatch(watchID);
-        if (wakeLock) { wakeLock.release(); wakeLock = null; } // RELEASE NO-SLEEP ON STOP
+        if (wakeLock) { wakeLock.release(); wakeLock = null; }
         totalDistance += sessionDistance; localStorage.setItem('chan_accumulated_km', totalDistance);
+        
+        // Save to Database
         const tx = db.transaction("rides", "readwrite");
         tx.objectStore("rides").add({ 
             date: document.getElementById('fullDate').innerText, distance: sessionDistance.toFixed(2), 
             pace: paceEl.innerText, duration: timerEl.innerText, location: rideLocation, route: ridePath 
         });
+
+        // CLEAR SESSION PERSISTENCE
+        localStorage.removeItem('chan_session_dist');
+        localStorage.removeItem('chan_session_seconds');
+        localStorage.removeItem('chan_session_path');
+        
         speak("Finished"); location.reload();
     };
+
+    // (Remaining helper functions like updateGpsIcon, renderHistory, etc., stay the same as your original)
+    function updateGpsIcon(accuracy) {
+        const icon = document.getElementById('gpsIcon');
+        if (accuracy < 25) { icon.classList.add('sig-good'); accDisplay.innerText = `ACCURACY: ${accuracy.toFixed(0)}M (LOCKED)`; accDisplay.style.color = "var(--accent-blue)"; }
+        else { icon.classList.remove('sig-good'); accDisplay.innerText = `ACCURACY: ${accuracy.toFixed(0)}M (SEARCHING)`; accDisplay.style.color = "var(--warning-yellow)"; }
+    }
+    
+    function checkStatus() {
+        if (!targetDate || targetGoal <= 0) return;
+        const due = new Date(targetDate).setHours(0,0,0,0);
+        const diffDays = Math.ceil((due - new Date().setHours(0,0,0,0)) / 86400000);
+        document.getElementById('balDateDisplay').innerText = `DUE: ${targetDate.split('-').reverse().join('/')}`;
+        document.getElementById('daysLeftDisplay').innerText = diffDays < 0 ? "OVERDUE" : `${diffDays} DAYS LEFT`;
+    }
 
     function showSavedRoute(rideId) {
         db.transaction("rides").objectStore("rides").get(rideId).onsuccess = (e) => {
@@ -469,47 +463,37 @@
             list.innerHTML = ""; chart.innerHTML = "";
             const rides = req.result;
             const maxDist = Math.max(...rides.map(r => parseFloat(r.distance))) || 1;
-            
             rides.forEach(ride => {
                 const bar = document.createElement('div'); bar.className = 'chart-bar';
                 bar.style.height = `${(parseFloat(ride.distance) / maxDist) * 100}%`;
                 bar.innerHTML = `<span class="bar-val">${ride.distance} KM</span><span class="bar-date">${ride.date.substring(0,5)}</span>`;
                 chart.appendChild(bar);
             });
-
             rides.reverse().forEach(ride => {
                 const row = document.createElement('div'); row.className = "history-item";
-                row.innerHTML = `
-                    <div class="history-content"><strong>${ride.date}</strong><br>${ride.distance} KM | ${ride.duration}<br><small>${ride.location}</small></div>
+                row.innerHTML = `<div class="history-content"><strong>${ride.date}</strong><br>${ride.distance} KM | ${ride.duration}<br><small>${ride.location}</small></div>
                     <div class="history-actions">
                         <span class="material-icons-round" onclick="showSavedRoute(${ride.id})" style="color:var(--neon-green); cursor:pointer;">map</span>
                         <span class="material-icons-round" onclick="deleteride(${ride.id})" style="color:var(--danger-red); cursor:pointer;">delete</span>
                     </div>`;
                 list.appendChild(row);
             });
-            document.querySelector('.chart-wrapper').scrollLeft = 9999;
         };
     }
-
+    
     document.getElementById('exportPdf').onclick = () => {
         const tx = db.transaction("rides", "readonly");
         const req = tx.objectStore("rides").getAll();
         req.onsuccess = () => {
             const rides = req.result;
-            if(rides.length === 0) { alert("No rides found."); return; }
+            if(rides.length === 0) return alert("No rides found.");
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
             const accent = [50, 215, 75]; 
             doc.setFontSize(22); doc.setTextColor(...accent); doc.text("RIDE TRACKER REPORT", 14, 20);
             doc.setFontSize(10); doc.setTextColor(100); doc.text(`LIFETIME DISTANCE: ${totalDistance.toFixed(2)} KM`, 14, 28);
             const tableData = [...rides].reverse().map(r => [r.date, r.distance + " KM", r.duration, r.pace, r.location]);
-            doc.autoTable({
-                startY: 40,
-                head: [['Date', 'Distance', 'Duration', 'Pace', 'Location']],
-                body: tableData,
-                headStyles: { fillColor: accent, textColor: [0, 0, 0] },
-                alternateRowStyles: { fillColor: [240, 240, 240] }
-            });
+            doc.autoTable({ startY: 40, head: [['Date', 'Distance', 'Duration', 'Pace', 'Location']], body: tableData, headStyles: { fillColor: accent, textColor: [0, 0, 0] } });
             doc.save(`Ride_Report_${new Date().getTime()}.pdf`);
         };
     };

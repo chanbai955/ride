@@ -342,17 +342,33 @@
     };
 
     window.viewHistoricalMap = (id) => {
-        const tx = db.transaction("rides", "readonly");
-        tx.objectStore("rides").get(id).onsuccess = (e) => {
-            const ride = e.target.result;
-            if(!ride.route.length) return alert("No GPS data");
-            document.getElementById('historyModal').style.display = 'none';
-            mapState = 2; document.getElementById('mapLoopBtn').click(); // Force show map
-            routeLine.setLatLngs(ride.route);
-            map.fitBounds(routeLine.getBounds(), {padding: [30,30]});
-            speak(`Viewing ride from ${ride.date}`);
-        };
+    const tx = db.transaction("rides", "readonly");
+    tx.objectStore("rides").get(id).onsuccess = (e) => {
+        const ride = e.target.result;
+        if(!ride.route.length) return alert("No GPS data");
+        
+        document.getElementById('historyModal').style.display = 'none';
+        mapState = 2; 
+        document.getElementById('mapLoopBtn').click(); // Force show map
+        
+        routeLine.setLatLngs(ride.route);
+        map.fitBounds(routeLine.getBounds(), {padding: [30,30]});
+
+        // --- NEW BRITISH DATE LOGIC ---
+        // Converts "DD/MM/YYYY" string back to a date object for the voice
+        const dateParts = ride.date.split('/');
+        const dateObj = new Date(+dateParts[2], dateParts[1] - 1, +dateParts[0]);
+        
+        const britishDate = dateObj.toLocaleDateString('en-GB', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric'
+        });
+
+        speak(`Viewing ride from ${britishDate}`);
+        // ------------------------------
     };
+};
 
     document.getElementById('snapMap').onclick = () => {
         html2canvas(document.getElementById('map'), { useCORS: true }).then(canvas => {

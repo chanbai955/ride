@@ -3,13 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Chanthiran Ride Tracker Pro</title>
+    <title>Ride Tracker Pro</title>
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         :root {
             --neon-green: #32D74B;
@@ -41,12 +40,9 @@
         }
         .riding-pulse { animation: pulse 1.5s infinite ease-in-out; }
 
-        /* MAIN DISPLAY */
         .main-display { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 25px; position: relative; }
         #map { position: absolute; top: 10px; bottom: 10px; left: 15px; right: 15px; border-radius: 20px; border: 1px solid #333; z-index: 5; display: none; }
         
-        #snapMap { position: absolute; top: 25px; right: 30px; z-index: 100; background: rgba(0,0,0,0.7); display: none; }
-
         .main-stat { 
             font-size: clamp(6.5rem, 25vw, 8.5rem); 
             font-weight: 900; margin: 0; 
@@ -120,8 +116,6 @@
     
     <div class="main-display">
         <div id="map"></div>
-        <button id="snapMap" class="btn btn-side"><span class="material-icons-round" style="color:var(--neon-green)">camera_alt</span></button>
-        
         <p class="main-stat" id="distance">0.00</p>
         <div class="label-row">
             <p class="label">KILOMETERS</p>
@@ -172,7 +166,7 @@
                     <span id="closeHistory" class="material-icons-round" style="cursor:pointer; font-size:28px;">close</span>
                 </div>
             </div>
-            <div class="chart-wrapper"><div class="chart-container" id="runChart"></div></div>
+            <div class="chart-wrapper"><div class="chart-container" id="rideChart"></div></div>
             <div class="history-list-container" id="lapList"></div>
         </div>
     </div>
@@ -198,66 +192,51 @@
     let totalDistance = parseFloat(localStorage.getItem('chan_accumulated_km')) || 0;
     let targetGoal = parseFloat(localStorage.getItem('chan_target_km')) || 0;
     let targetDate = localStorage.getItem('chan_target_date') || "";
-    let runLocation = localStorage.getItem('chan_ride_loc') || "NOT SET";
+    let rideLocation = localStorage.getItem('chan_ride_loc') || "NOT SET";
     
     let sessionDistance = parseFloat(localStorage.getItem('chan_session_dist')) || 0;
     let totalSeconds = parseInt(localStorage.getItem('chan_session_seconds')) || 0;
-    let runPath = JSON.parse(localStorage.getItem('chan_session_path')) || [];
-    let lastSpokenDistance = sessionDistance;
+    let ridePath = JSON.parse(localStorage.getItem('chan_session_path')) || [];
+    let lastSpokenMilestone = Math.floor(sessionDistance * 2) / 2;
     let lastPointTime = Date.now();
+    let stationaryTime = 0;
+    let isPausedManually = true;
 
-    let watchID, timerInterval, lastCoords = null, db;
+    let watchID, timerInterval, lastCoords = null, db, wakeLock = null;
     let map, routeLine, currentMarker, streetTiles, satelliteTiles;
-    let mapState = 2; // 0:Street, 1:Sat, 2:Hidden
+    let mapState = 2;
+
+    async function requestWakeLock() {
+        try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } 
+        catch (err) { console.log(err); }
+    }
 
     const dbReq = indexedDB.open("rideProEliteDB", 5);
     dbReq.onupgradeneeded = (e) => {
         let db = e.target.result;
         if(!db.objectStoreNames.contains("rides")) db.createObjectStore("rides", { keyPath: "id", autoIncrement: true });
     };
-    dbReq.onsuccess = (e) => { db = e.target.result; };
+    dbReq.onsuccess = (e) => { 
+        db = e.target.result; 
+        startGlobalWatcher(); 
+    };
 
     window.onload = () => {
         initMap();
         updateDisplay();
         checkGoalStatus();
         document.getElementById('fullDate').innerText = new Date().toLocaleDateString('en-GB');
-        document.getElementById('locDisplay').innerText = runLocation;
+        document.getElementById('locDisplay').innerText = rideLocation;
         setInterval(() => { document.getElementById('liveClock').innerText = new Date().toTimeString().split(' ')[0]; }, 1000);
     };
 
     function initMap() {
         map = L.map('map', { zoomControl: false }).setView([0, 0], 15);
-        streetTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { crossOrigin: true });
-        satelliteTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{y}/{x}/{z}', { crossOrigin: true });
-        streetTiles.addTo(map);
-        routeLine = L.polyline(runPath, {color: '#32D74B', weight: 6}).addTo(map);
+        streetTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        satelliteTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{y}/{x}/{z}');
+        routeLine = L.polyline(ridePath, {color: '#32D74B', weight: 6}).addTo(map);
         currentMarker = L.circleMarker([0, 0], {radius: 8, color: '#0A84FF', fillColor: '#0A84FF', fillOpacity: 1}).addTo(map);
     }
-
-    document.getElementById('mapLoopBtn').onclick = function() {
-        mapState = (mapState + 1) % 3;
-        const mapEl = document.getElementById('map');
-        const snapBtn = document.getElementById('snapMap');
-        const icon = this.querySelector('.material-icons-round');
-        
-        icon.style.transform = `rotate(${360 * (mapState + 1)}deg)`;
-
-        if (mapState === 0) {
-            mapEl.style.display = 'block'; snapBtn.style.display = 'block';
-            mapEl.classList.remove('satellite-view');
-            map.removeLayer(satelliteTiles); streetTiles.addTo(map);
-            if(runPath.length > 0) map.fitBounds(routeLine.getBounds());
-        } else if (mapState === 1) {
-            mapEl.style.display = 'block'; snapBtn.style.display = 'block';
-            mapEl.classList.add('satellite-view');
-            map.removeLayer(streetTiles); satelliteTiles.addTo(map);
-            if(runPath.length > 0) map.fitBounds(routeLine.getBounds());
-        } else {
-            mapEl.style.display = 'none'; snapBtn.style.display = 'none';
-        }
-        if (mapState !== 2) setTimeout(() => { map.invalidateSize(); }, 200);
-    };
 
     function updateDisplay() {
         document.getElementById('distance').innerText = sessionDistance.toFixed(2);
@@ -287,141 +266,205 @@
 
     function speak(t) { window.speechSynthesis.cancel(); window.speechSynthesis.speak(new SpeechSynthesisUtterance(t)); }
 
-    document.getElementById('startBtn').onclick = () => {
-        if (document.getElementById('startIcon').innerText === "pause") {
-            clearInterval(timerInterval);
-            navigator.geolocation.clearWatch(watchID);
-            document.getElementById('startIcon').innerText = "play_arrow";
-            speak("Paused");
-            return;
-        }
-        speak(totalSeconds === 0 ? "Enjoy Your RIDE" : "resumed");
-        document.getElementById('startIcon').innerText = "pause";
-        document.getElementById('stopBtn').classList.remove('hidden');
-        
-        timerInterval = setInterval(() => { totalSeconds++; updateDisplay(); }, 1000);
+    function checkVoiceMilestones() {
+        let currentMilestone = Math.floor(sessionDistance * 2) / 2;
+        if (currentMilestone > lastSpokenMilestone) {
+            lastSpokenMilestone = currentMilestone;
+            const isFullKm = currentMilestone % 1 === 0;
+            
+            let extra = "";
+            if (currentMilestone === 5.0) extra = ". Just ride.";
+            if (currentMilestone === 10.0) extra = ". Keep moving.";
+            if (currentMilestone === 15.0) extra = ". Almost there.";
+            if (currentMilestone === 20.0) extra = ". Never give up.";
 
+            if (isFullKm) {
+                let t = document.getElementById('timer').innerText.split(":");
+                let p = document.getElementById('pace').innerText.replace('"', '').split("'");
+                speak(`${currentMilestone} kilometers${extra}. Time ${parseInt(t[0])} minutes. Pace ${p[0]} minutes ${p[1]} seconds.`);
+            } else {
+                speak(`${currentMilestone} kilometers.`);
+            }
+        }
+    }
+
+    function startGlobalWatcher() {
         watchID = navigator.geolocation.watchPosition(pos => {
-            const { latitude: lat, longitude: lng, accuracy } = pos.coords;
-            currentMarker.setLatLng([lat, lng]);
-            if (mapState !== 2) map.panTo([lat, lng]);
+            const { latitude: lat, longitude: lng, accuracy, speed } = pos.coords;
+            if(currentMarker) currentMarker.setLatLng([lat, lng]);
             updateGpsIcon(accuracy);
-            if (accuracy > 40) return;
-            if (lastCoords) {
-                const d = map.distance([lastCoords.lat, lastCoords.lng], [lat, lng]) / 1000;
-                if (d > 0.005) {
-                    sessionDistance += d;
-                    runPath.push([lat, lng]);
-                    routeLine.addLatLng([lat, lng]);
-                    updateDisplay();
+
+            const currentSpeedKmh = (speed || 0) * 3.6;
+
+            if (!timerInterval && !isPausedManually && currentSpeedKmh > 5) {
+                startRide();
+                speak("Movement detected. Starting ride.");
+            }
+
+            if (timerInterval && accuracy <= 40) {
+                if (lastCoords) {
+                    const R = 6371;
+                    const dLat = (lat - lastCoords.lat) * Math.PI/180;
+                    const dLon = (lng - lastCoords.lng) * Math.PI/180;
+                    const a = Math.sin(dLat/2)**2 + Math.cos(lastCoords.lat * Math.PI/180) * Math.cos(lat * Math.PI/180) * Math.sin(dLon/2)**2;
+                    const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                    
+                    if (d > 0.005) { 
+                        stationaryTime = 0;
+                        sessionDistance += d;
+                        ridePath.push([lat, lng]);
+                        routeLine.addLatLng([lat, lng]);
+                        localStorage.setItem('chan_session_dist', sessionDistance);
+                        localStorage.setItem('chan_session_path', JSON.stringify(ridePath));
+                        updateDisplay();
+                        checkVoiceMilestones();
+                    }
                 }
             }
             lastCoords = {lat, lng};
         }, null, {enableHighAccuracy: true});
+    }
+
+    function startRide() {
+        isPausedManually = false;
+        document.getElementById('startIcon').innerText = "pause";
+        document.getElementById('stopBtn').classList.remove('hidden');
+        document.getElementById('headerRideIcon').classList.add('riding-pulse');
+        requestWakeLock();
+        
+        if (!timerInterval) {
+            timerInterval = setInterval(() => {
+                totalSeconds++;
+                stationaryTime++;
+                if (stationaryTime > 120) { 
+                    pauseRide();
+                    speak("Ride paused due to no movement.");
+                }
+                localStorage.setItem('chan_session_seconds', totalSeconds);
+                updateDisplay();
+            }, 1000);
+        }
+    }
+
+    function pauseRide() {
+        clearInterval(timerInterval);
+        timerInterval = null;
+        if (wakeLock) { wakeLock.release(); wakeLock = null; }
+        document.getElementById('startIcon').innerText = "play_arrow";
+        document.getElementById('headerRideIcon').classList.remove('riding-pulse');
+    }
+
+    document.getElementById('startBtn').onclick = () => {
+        if (document.getElementById('startIcon').innerText === "pause") {
+            isPausedManually = true;
+            pauseRide();
+            speak("Ride paused manually.");
+        } else {
+            startRide();
+            speak("Enjoy your ride.");
+        }
     };
 
     function updateGpsIcon(accuracy) {
+        const icon = document.getElementById('gpsIcon');
         const accDisplay = document.getElementById('accDisplay');
-        document.getElementById('gpsIcon').className = accuracy < 25 ? "material-icons-round sig-good" : "material-icons-round";
-        accDisplay.innerText = `ACCURACY: ${accuracy.toFixed(0)}M`;
+        if (accuracy < 25) { 
+            icon.classList.add('sig-good'); 
+            accDisplay.innerText = `ACCURACY: ${accuracy.toFixed(0)}M (LOCKED)`; 
+            accDisplay.style.color = "var(--accent-blue)"; 
+        } else { 
+            icon.classList.remove('sig-good'); 
+            accDisplay.innerText = `ACCURACY: ${accuracy.toFixed(0)}M (SEARCHING)`; 
+            accDisplay.style.color = "var(--warning-yellow)"; 
+        }
     }
 
-    document.getElementById('stopBtn').onclick = () => {
+    document.getElementById('stopBtn').onclick = async () => {
         if(!confirm("Finish and Save?")) return;
+        pauseRide();
         const tx = db.transaction("rides", "readwrite");
         tx.objectStore("rides").add({ 
             date: document.getElementById('fullDate').innerText, 
             distance: sessionDistance.toFixed(2), 
             duration: document.getElementById('timer').innerText, 
             pace: document.getElementById('pace').innerText,
-            location: runLocation, route: [...runPath] 
+            location: rideLocation, route: ridePath 
         });
-        localStorage.setItem('chan_accumulated_km', totalDistance + sessionDistance);
-        speak("Ride Saved. Well done Chanthiran");
+        totalDistance += sessionDistance;
+        localStorage.setItem('chan_accumulated_km', totalDistance);
+        localStorage.removeItem('chan_session_dist');
+        localStorage.removeItem('chan_session_seconds');
+        localStorage.removeItem('chan_session_path');
+        speak("Ride saved. Well done Chanthiran.");
         setTimeout(() => location.reload(), 2000);
     };
 
-    window.viewHistoricalMap = (id) => {
-    const tx = db.transaction("rides", "readonly");
-    tx.objectStore("rides").get(id).onsuccess = (e) => {
-        const ride = e.target.result;
-        if(!ride.route.length) return alert("No GPS data");
-        
-        document.getElementById('historyModal').style.display = 'none';
-        mapState = 2; 
-        document.getElementById('mapLoopBtn').click(); // Force show map
-        
-        routeLine.setLatLngs(ride.route);
-        map.fitBounds(routeLine.getBounds(), {padding: [30,30]});
-
-        // --- NEW BRITISH DATE LOGIC ---
-        // Converts "DD/MM/YYYY" string back to a date object for the voice
-        const dateParts = ride.date.split('/');
-        const dateObj = new Date(+dateParts[2], dateParts[1] - 1, +dateParts[0]);
-        
-        const britishDate = dateObj.toLocaleDateString('en-GB', {
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric'
-        });
-
-        speak(`Viewing ride from ${britishDate}`);
-        // ------------------------------
+    document.getElementById('mapLoopBtn').onclick = function() {
+        mapState = (mapState + 1) % 3;
+        const mapEl = document.getElementById('map');
+        if (mapState === 0) {
+            mapEl.style.display = 'block';
+            map.removeLayer(satelliteTiles);
+            streetTiles.addTo(map);
+        } else if (mapState === 1) {
+            mapEl.style.display = 'block';
+            map.removeLayer(streetTiles);
+            satelliteTiles.addTo(map);
+        } else {
+            mapEl.style.display = 'none';
+        }
+        if (mapState !== 2) setTimeout(() => map.invalidateSize(), 200);
     };
-};
 
-    document.getElementById('snapMap').onclick = () => {
-        html2canvas(document.getElementById('map'), { useCORS: true }).then(canvas => {
-            const link = document.createElement('a');
-            link.download = `Ride_Map_${Date.now()}.png`;
-            link.href = canvas.toDataURL();
-            link.click();
-            speak("Map saved");
-        });
+    document.getElementById('openHistory').onclick = () => {
+        document.getElementById('historyModal').style.display = 'flex';
+        renderHistory();
     };
 
     function renderHistory() {
         const tx = db.transaction("rides", "readonly");
-        tx.objectStore("rides").getAll().onsuccess = (e) => {
-            const list = document.getElementById('lapList'), chart = document.getElementById('runChart');
+        const req = tx.objectStore("rides").getAll();
+        req.onsuccess = () => {
+            const list = document.getElementById('lapList'), chart = document.getElementById('rideChart');
             list.innerHTML = ""; chart.innerHTML = "";
-            const rides = e.target.result;
+            const rides = req.result;
+            const maxDist = Math.max(...rides.map(r => parseFloat(r.distance))) || 1;
             rides.forEach(ride => {
                 const bar = document.createElement('div'); bar.className = 'chart-bar';
-                bar.style.height = `${(ride.distance / 50) * 100}%`;
+                bar.style.height = `${(parseFloat(ride.distance) / maxDist) * 100}%`;
                 bar.innerHTML = `<span class="bar-val">${ride.distance}</span>`;
                 chart.appendChild(bar);
             });
             rides.reverse().forEach(ride => {
                 const row = document.createElement('div'); row.className = "history-item";
-                row.innerHTML = `<div><strong>${ride.date}</strong><br>${ride.distance} KM | ${ride.duration}</div>
-                    <div style="display:flex; gap:15px;">
-                        <span class="material-icons-round" onclick="viewHistoricalMap(${ride.id})" style="color:var(--neon-green)">map</span>
-                        <span class="material-icons-round" onclick="deleteRide(${ride.id})" style="color:var(--danger-red)">delete</span>
-                    </div>`;
+                row.innerHTML = `<div><strong>${ride.date}</strong><br>${ride.distance} KM</div>
+                                 <span class="material-icons-round" onclick="deleteRide(${ride.id})" style="color:var(--danger-red);">delete</span>`;
                 list.appendChild(row);
             });
         };
     }
 
     window.deleteRide = (id) => { if(confirm("Delete?")) db.transaction("rides", "readwrite").objectStore("rides").delete(id).onsuccess = renderHistory; };
-
-    document.getElementById('exportPdf').onclick = () => {
-        db.transaction("rides", "readonly").objectStore("rides").getAll().onsuccess = (e) => {
-            const { jsPDF } = window.jspdf; const doc = new jsPDF();
-            doc.text("CHANTHIRAN RIDE REPORT", 14, 20);
-            doc.autoTable({ startY: 30, head: [['Date', 'KM', 'Time', 'Pace', 'Route']], body: e.target.result.map(r => [r.date, r.distance, r.duration, r.pace, r.location]) });
-            doc.save("Ride_Report.pdf");
-        };
-    };
-
-    document.getElementById('openHistory').onclick = () => { document.getElementById('historyModal').style.display = 'flex'; renderHistory(); };
     document.getElementById('closeHistory').onclick = () => document.getElementById('historyModal').style.display = 'none';
     document.getElementById('editGoal').onclick = () => document.getElementById('goalModal').style.display = 'flex';
-    document.getElementById('saveGoal').onclick = () => { localStorage.setItem('chan_target_km', document.getElementById('goalInput').value); localStorage.setItem('chan_target_date', document.getElementById('dateInput').value); location.reload(); };
+    document.getElementById('saveGoal').onclick = () => {
+        localStorage.setItem('chan_target_km', document.getElementById('goalInput').value);
+        localStorage.setItem('chan_target_date', document.getElementById('dateInput').value);
+        location.reload();
+    };
     document.getElementById('editLoc').onclick = () => document.getElementById('locModal').style.display = 'flex';
-    document.getElementById('saveLoc').onclick = () => { localStorage.setItem('chan_ride_loc', document.getElementById('locInput').value); location.reload(); };
-    document.getElementById('newRideBtn').onclick = () => { if(confirm("Wipe all data?")) { localStorage.clear(); location.reload(); }};
+    document.getElementById('saveLoc').onclick = () => {
+        localStorage.setItem('chan_ride_loc', document.getElementById('locInput').value);
+        location.reload();
+    };
+    
+    document.getElementById('newRideBtn').onclick = () => { 
+        if(confirm("Wipe all data?")) { 
+            speak("Health is wealth");
+            localStorage.clear(); 
+            setTimeout(() => { location.reload(); }, 2000);
+        } 
+    };
 </script>
 </body>
 </html>

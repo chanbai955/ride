@@ -209,7 +209,7 @@
     const dbReq = indexedDB.open("rideProEliteDB", 5);
     dbReq.onupgradeneeded = (e) => {
         let db = e.target.result;
-        if(!db.objectStoreNames.contains("runs")) db.createObjectStore("runs", { keyPath: "id", autoIncrement: true });
+        if(!db.objectStoreNames.contains("rides")) db.createObjectStore("rides", { keyPath: "id", autoIncrement: true });
     };
     dbReq.onsuccess = (e) => { db = e.target.result; };
 
@@ -367,8 +367,8 @@
         if(!confirm("Finish and Save? Everything will reset to zero.")) return;
         clearInterval(timerInterval);
         if(watchID) navigator.geolocation.clearWatch(watchID);
-        const tx = db.transaction("runs", "readwrite");
-        tx.objectStore("runs").add({ 
+        const tx = db.transaction("rides", "readwrite");
+        tx.objectStore("rides").add({ 
             date: document.getElementById('fullDate').innerText, 
             distance: sessionDistance.toFixed(2), 
             duration: document.getElementById('timer').innerText, 
@@ -391,7 +391,7 @@
         document.getElementById('headerRideIcon').classList.remove('riding-pulse');
         if(routeLine) routeLine.setLatLngs([]);
         
-        speak("Ride Completed And Saved - The miracle isn't that you finished. The miracle is that you had the courage to start");
+        speak("Ride Completed And Saved - The miracle isn't that you finished. The miracle is that you had the courage to start - Bravo Chanthiran");
         setTimeout(() => location.reload(), 3000);
     };
 
@@ -406,20 +406,20 @@
     };
 
     function renderHistory() {
-        const tx = db.transaction("runs", "readonly");
-        const req = tx.objectStore("runs").getAll();
+        const tx = db.transaction("rides", "readonly");
+        const req = tx.objectStore("rides").getAll();
         req.onsuccess = () => {
             const list = document.getElementById('lapList'), chart = document.getElementById('runChart');
             list.innerHTML = ""; chart.innerHTML = "";
-            const runs = req.result;
-            const maxDist = Math.max(...runs.map(r => parseFloat(r.distance))) || 1;
-            runs.forEach(ride => {
+            const rides = req.result;
+            const maxDist = Math.max(...rides.map(r => parseFloat(r.distance))) || 1;
+            rides.forEach(ride => {
                 const bar = document.createElement('div'); bar.className = 'chart-bar';
                 bar.style.height = `${(parseFloat(ride.distance) / maxDist) * 100}%`;
                 bar.innerHTML = `<span class="bar-val">${ride.distance} KM</span><span class="bar-date">${ride.date.substring(0,5)}</span>`;
                 chart.appendChild(bar);
             });
-            runs.reverse().forEach(ride => {
+            rides.reverse().forEach(ride => {
                 const row = document.createElement('div'); row.className = "history-item";
                 row.innerHTML = `<div class="history-content"><strong>${ride.date}</strong><br>${ride.distance} KM | ${ride.duration}<br><small>${ride.location}</small></div>
                                   <span class="material-icons-round" onclick="deleteRide(${ride.id})" style="color:var(--danger-red); cursor:pointer;">delete</span>`;
@@ -430,21 +430,21 @@
 
     window.deleteRide = (id) => { 
         if(confirm("Delete?")) { 
-            const tx = db.transaction("runs", "readwrite");
-            tx.objectStore("runs").delete(id).onsuccess = () => { renderHistory(); };
+            const tx = db.transaction("rides", "readwrite");
+            tx.objectStore("rides").delete(id).onsuccess = () => { renderHistory(); };
         }
     };
 
     document.getElementById('exportPdf').onclick = () => {
-        const tx = db.transaction("runs", "readonly");
-        const req = tx.objectStore("runs").getAll();
+        const tx = db.transaction("rides", "readonly");
+        const req = tx.objectStore("rides").getAll();
         req.onsuccess = () => {
-            const runs = req.result;
-            if(runs.length === 0) return alert("No runs found.");
+            const rides = req.result;
+            if(rides.length === 0) return alert("No rides found.");
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
             doc.text("RIDE TRACKER REPORT", 14, 20);
-            const tableData = runs.reverse().map(r => [r.date, r.distance + " KM", r.duration, r.pace, r.location]);
+            const tableData = rides.reverse().map(r => [r.date, r.distance + " KM", r.duration, r.pace, r.location]);
             doc.autoTable({ startY: 30, head: [['Date', 'Distance', 'Duration', 'Pace', 'Location']], body: tableData });
             doc.save(`Ride_Report_${new Date().getTime()}.pdf`);
         };

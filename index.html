@@ -92,9 +92,6 @@
 
         .standard-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 2100; display: none; justify-content: center; align-items: center; }
         .modal-card { background: var(--card-bg); width: 85%; padding: 30px; border-radius: 25px; text-align: center; }
-        
-        .leaflet-tile-container { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%); }
-        .satellite-view .leaflet-tile-container { filter: none !important; }
 
         /* Pocket Lock Styles */
         #pocketLock {
@@ -238,7 +235,7 @@
     let isPausedManually = true;
     let speechVolume = 1;
 
-    let watchID, timerInterval, db, wakeLock = null;
+    let watchID, timerInterval, db;
     let map, routeLine, currentMarker, streetTiles, satelliteTiles;
     let mapState = 2;
 
@@ -284,7 +281,7 @@
 
             if (!timerInterval && !isPausedManually && currentSpeedKmh > 5) {
                 startRide();
-                speak("Resuming ride.");
+                speak("Movement detected. Resuming ride.");
             }
 
             if (timerInterval && accuracy <= 40) {
@@ -320,7 +317,7 @@
             timerInterval = setInterval(() => {
                 totalSeconds++;
                 stationaryTime++;
-                if (stationaryTime > 120) { pauseRide(); speak("Ride paused."); }
+                if (stationaryTime > 120) { pauseRide(); speak("Ride auto paused."); }
                 localStorage.setItem('chan_session_seconds', totalSeconds);
                 updateDisplay();
             }, 1000);
@@ -352,6 +349,7 @@
         startRide();
     }
 };
+
     document.getElementById('stopBtn').onclick = async () => {
         if(!confirm("Finish and Save?")) return;
         pauseRide();
@@ -371,6 +369,33 @@
         setTimeout(() => location.reload(), 4000);
     };
 
+    // PDF Export Logic
+    document.getElementById('exportPdf').onclick = () => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        const tx = db.transaction("rides", "readonly");
+        const req = tx.objectStore("rides").getAll();
+
+        req.onsuccess = () => {
+            const rides = req.result;
+            if (rides.length === 0) { alert("No ride data to export!"); return; }
+            doc.setFontSize(18);
+            doc.text("Chanthiran Ride History Report", 14, 20);
+            doc.setFontSize(10);
+            doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 28);
+            const tableBody = rides.map(r => [r.date, r.location || "NOT SET", `${r.distance} KM`, r.duration, r.pace]);
+            doc.autoTable({
+                startY: 35,
+                head: [['Date', 'Route/Location', 'Distance', 'Duration', 'Avg Pace']],
+                body: tableBody,
+                theme: 'striped',
+                headStyles: { fillColor: [50, 215, 75] }
+            });
+            doc.save(`Ride_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+        };
+    };
+
+    // Pocket Lock Logic
     const lockOverlay = document.getElementById('pocketLock');
     const unlockBtn = document.getElementById('unlockBtn');
     let unlockTimer;
@@ -455,7 +480,7 @@
         localStorage.setItem('chan_ride_loc', document.getElementById('locInput').value);
         location.reload();
     };
-    document.getElementById('newRideBtn').onclick = () => { if(confirm("Wipe all data?")) { speak("Its a New Run. Run for Health"); localStorage.clear(); setTimeout(() => location.reload(), 2000); } };
+    document.getElementById('newRideBtn').onclick = () => { if(confirm("Wipe all data?")) { speak("Health is wealth"); localStorage.clear(); setTimeout(() => location.reload(), 2000); } };
 
     function renderHistory() {
         const tx = db.transaction("rides", "readonly");

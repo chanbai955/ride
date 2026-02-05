@@ -86,14 +86,15 @@
         .chart-container { display: inline-flex; align-items: flex-end; gap: 15px; min-width: 100%; height: 120px; }
         .chart-bar { flex: 0 0 45px; background: var(--neon-green); border-radius: 6px 6px 0 0; position: relative; display: flex; align-items: flex-end; justify-content: center; }
         .chart-bar span.bar-val { writing-mode: vertical-rl; transform: rotate(180deg); color: var(--accent-blue); font-size: 0.6rem; font-weight: 900; margin-bottom: 8px; }
-        .chart-bar span.bar-date { position: absolute; bottom: -25px; color: #888; font-size: 0.6rem; font-weight: 800; }
+        
         .history-list-container { padding: 10px 25px 120px 25px; }
         .history-item { background: #2c2c2e; margin-bottom: 12px; padding: 15px; border-radius: 15px; border-left: 4px solid var(--accent-blue); display: flex; justify-content: space-between; align-items: center; }
 
         .standard-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 2100; display: none; justify-content: center; align-items: center; }
         .modal-card { background: var(--card-bg); width: 85%; padding: 30px; border-radius: 25px; text-align: center; }
+        .modal-card input { width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none; background: #333; color: #fff; font-weight: 800; }
 
-        /* Pocket Lock Styles */
+        /* Pocket Lock */
         #pocketLock {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
             background: #000; z-index: 9999; flex-direction: column; justify-content: center; align-items: center;
@@ -103,7 +104,6 @@
             border-radius: 50%; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center;
         }
 
-        /* Short Blue Volume Bar */
         .vol-container { width: 60% !important; margin: 5px auto 15px auto; }
         #volSlider { -webkit-appearance: none; width: 100%; height: 6px; background: #333; border-radius: 5px; outline: none; }
         #volSlider::-webkit-slider-runnable-track { width: 100%; height: 6px; cursor: pointer; background: #0A84FF; border-radius: 5px; }
@@ -113,7 +113,7 @@
         }
     </style>
 </head>
-<body>
+<body onclick="resetAutoLockTimer()">
 
     <div class="header">
         <div class="header-info">
@@ -193,7 +193,8 @@
         <div class="quick-note">
             <div class="sticky-history-header">
                 <h2 style="color:var(--neon-green); margin:0;">RIDE NOTES</h2>
-                <div style="display:flex; gap:20px; align-items:center;">
+                <div style="display:flex; gap:15px; align-items:center;">
+                    <span id="addManualRide" class="material-icons-round" style="cursor:pointer; color:var(--accent-blue); font-size:28px;">add_circle</span>
                     <span id="exportPdf" class="material-icons-round" style="cursor:pointer; color:var(--danger-red); font-size:28px;">picture_as_pdf</span>
                     <span id="closeHistory" class="material-icons-round" style="cursor:pointer; font-size:28px;">close</span>
                 </div>
@@ -203,10 +204,30 @@
         </div>
     </div>
 
+    <div id="manualEntryModal" class="standard-modal">
+        <div class="modal-card">
+            <h2 id="manualTitle">MANUAL ENTRY</h2>
+            <input type="hidden" id="editRideId">
+            <p style="font-size: 0.7rem; color: #888; text-align: left; margin-left: 5%;">DATE</p>
+            <input type="date" id="manualDate">
+            <p style="font-size: 0.7rem; color: #888; text-align: left; margin-left: 5%;">LOCATION</p>
+            <input type="text" id="manualLoc" placeholder="Location/Route">
+            <p style="font-size: 0.7rem; color: #888; text-align: left; margin-left: 5%;">DISTANCE (KM)</p>
+            <input type="number" id="manualDist" step="0.01" placeholder="0.00">
+            <p style="font-size: 0.7rem; color: #888; text-align: left; margin-left: 5%;">TIME (HH:MM:SS)</p>
+            <input type="text" id="manualTime" placeholder="00:00:00">
+            
+            <div style="display:flex; gap:10px; margin-top: 10px;">
+                <button onclick="document.getElementById('manualEntryModal').style.display='none'" style="flex:1; padding:15px; background:#444; border-radius:15px; color:white; border:none;">CANCEL</button>
+                <button id="saveManualBtn" style="flex:1; padding:15px; background:var(--neon-green); border-radius:15px; font-weight:800; border:none;">SAVE</button>
+            </div>
+        </div>
+    </div>
+
     <div id="locModal" class="standard-modal">
         <div class="modal-card">
             <h2>LOCATION</h2>
-            <input type="text" id="locInput" placeholder="Enter Route" style="width:90%; padding:12px; margin-bottom:15px; border-radius:10px; border:none;">
+            <input type="text" id="locInput" placeholder="Enter Route">
             <button id="saveLoc" style="width:100%; padding:15px; background:var(--neon-green); border-radius:15px; font-weight:800; border:none;">SAVE</button>
         </div>
     </div>
@@ -214,8 +235,8 @@
     <div id="goalModal" class="standard-modal">
         <div class="modal-card">
             <h2>SET TARGET</h2>
-            <input type="number" id="goalInput" placeholder="KM" style="width:90%; padding:12px; margin-bottom:10px; border-radius:10px; border:none;">
-            <input type="date" id="dateInput" style="width:90%; padding:12px; margin-bottom:15px; border-radius:10px; border:none;">
+            <input type="number" id="goalInput" placeholder="KM">
+            <input type="date" id="dateInput">
             <button id="saveGoal" style="width:100%; padding:15px; background:var(--neon-green); border-radius:15px; font-weight:800; border:none;">SET GOAL</button>
         </div>
     </div>
@@ -229,11 +250,9 @@
     let sessionDistance = parseFloat(localStorage.getItem('chan_session_dist')) || 0;
     let totalSeconds = parseInt(localStorage.getItem('chan_session_seconds')) || 0;
     let ridePath = JSON.parse(localStorage.getItem('chan_session_path')) || [];
-    let lastSpokenMilestone = Math.floor(sessionDistance * 2) / 2;
-    let lastCoords = null;
-    let stationaryTime = 0;
     let isPausedManually = true;
     let speechVolume = 1;
+    let autoLockTimer;
 
     let watchID, timerInterval, db;
     let map, routeLine, currentMarker, streetTiles, satelliteTiles;
@@ -246,14 +265,21 @@
         window.speechSynthesis.speak(msg); 
     }
 
-    document.getElementById('volSlider').oninput = (e) => { speechVolume = e.target.value; };
+    function resetAutoLockTimer() {
+        clearTimeout(autoLockTimer);
+        if (!isPausedManually) {
+            autoLockTimer = setTimeout(() => {
+                if (!isPausedManually) document.getElementById('pocketLock').style.display = 'flex';
+            }, 3000);
+        }
+    }
 
     const dbReq = indexedDB.open("rideProEliteDB", 5);
     dbReq.onupgradeneeded = (e) => {
         let db = e.target.result;
         if(!db.objectStoreNames.contains("rides")) db.createObjectStore("rides", { keyPath: "id", autoIncrement: true });
     };
-    dbReq.onsuccess = (e) => { db = e.target.result; startGlobalWatcher(); };
+    dbReq.onsuccess = (e) => { db = e.target.result; startGlobalWatcher(); recalculateTotal(); };
 
     window.onload = () => {
         initMap();
@@ -274,16 +300,9 @@
 
     function startGlobalWatcher() {
         watchID = navigator.geolocation.watchPosition(pos => {
-            const { latitude: lat, longitude: lng, accuracy, speed } = pos.coords;
+            const { latitude: lat, longitude: lng, accuracy } = pos.coords;
             if(currentMarker) currentMarker.setLatLng([lat, lng]);
             updateGpsIcon(accuracy);
-            const currentSpeedKmh = (speed || 0) * 3.6;
-
-            if (!timerInterval && !isPausedManually && currentSpeedKmh > 5) {
-                startRide();
-                speak("Movement detected. Resuming ride.");
-            }
-
             if (timerInterval && accuracy <= 40) {
                 if (lastCoords) {
                     const R = 6371;
@@ -292,14 +311,12 @@
                     const a = Math.sin(dLat/2)**2 + Math.cos(lastCoords.lat * Math.PI/180) * Math.cos(lat * Math.PI/180) * Math.sin(dLon/2)**2;
                     const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
                     if (d > 0.005) { 
-                        stationaryTime = 0;
                         sessionDistance += d;
                         ridePath.push([lat, lng]);
                         routeLine.addLatLng([lat, lng]);
                         localStorage.setItem('chan_session_dist', sessionDistance);
                         localStorage.setItem('chan_session_path', JSON.stringify(ridePath));
                         updateDisplay();
-                        checkVoiceMilestones();
                     }
                 }
             }
@@ -309,15 +326,13 @@
 
     function startRide() {
         isPausedManually = false;
-        stationaryTime = 0;
         document.getElementById('startIcon').innerText = "pause";
         document.getElementById('stopBtn').classList.remove('hidden');
         document.getElementById('headerRideIcon').classList.add('riding-pulse');
+        resetAutoLockTimer();
         if (!timerInterval) {
             timerInterval = setInterval(() => {
                 totalSeconds++;
-                stationaryTime++;
-                if (stationaryTime > 120) { pauseRide(); speak("Ride auto paused."); }
                 localStorage.setItem('chan_session_seconds', totalSeconds);
                 updateDisplay();
             }, 1000);
@@ -327,120 +342,179 @@
     function pauseRide() {
         clearInterval(timerInterval);
         timerInterval = null;
+        isPausedManually = true;
+        clearTimeout(autoLockTimer);
         document.getElementById('startIcon').innerText = "play_arrow";
         document.getElementById('headerRideIcon').classList.remove('riding-pulse');
     }
 
-   document.getElementById('startBtn').onclick = () => {
-    const startIcon = document.getElementById('startIcon');
-    
-    if (startIcon.innerText === "pause") {
-        // Handle Manual Pause
-        isPausedManually = true;
-        pauseRide();
-        speak("Ride paused.");
-    } else {
-        // Determine if this is a brand new start or a resume from pause
-        if (sessionDistance === 0 && totalSeconds === 0) {
-            speak("Enjoy your ride.");
+    document.getElementById('startBtn').onclick = () => {
+        if (document.getElementById('startIcon').innerText === "pause") {
+            pauseRide();
+            speak("Ride paused.");
         } else {
-            speak("Ride resumed.");
+            startRide();
+            speak(sessionDistance === 0 ? "Enjoy your ride." : "Ride resumed.");
         }
-        startRide();
-    }
-};
+    };
 
     document.getElementById('stopBtn').onclick = async () => {
         if(!confirm("Finish and Save?")) return;
         pauseRide();
-        const finalDist = sessionDistance.toFixed(2);
         const tx = db.transaction("rides", "readwrite");
         tx.objectStore("rides").add({ 
             date: document.getElementById('fullDate').innerText, 
-            distance: finalDist, duration: document.getElementById('timer').innerText, 
+            distance: sessionDistance.toFixed(2), duration: document.getElementById('timer').innerText, 
             pace: document.getElementById('pace').innerText, location: rideLocation, route: ridePath 
-        });
-        totalDistance += sessionDistance;
-        localStorage.setItem('chan_accumulated_km', totalDistance);
-        localStorage.removeItem('chan_session_dist');
-        localStorage.removeItem('chan_session_seconds');
-        localStorage.removeItem('chan_session_path');
-        speak(`Run Completed And Saved. Your final distance is ${finalDist} kilometers. Well Done Chanthiran.`);
-        setTimeout(() => location.reload(), 4000);
-    };
-
-    // PDF Export Logic
-    document.getElementById('exportPdf').onclick = () => {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF();
-        const tx = db.transaction("rides", "readonly");
-        const req = tx.objectStore("rides").getAll();
-
-        req.onsuccess = () => {
-            const rides = req.result;
-            if (rides.length === 0) { alert("No ride data to export!"); return; }
-            doc.setFontSize(18);
-            doc.text("Chanthiran Ride History Report", 14, 20);
-            doc.setFontSize(10);
-            doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 28);
-            const tableBody = rides.map(r => [r.date, r.location || "NOT SET", `${r.distance} KM`, r.duration, r.pace]);
-            doc.autoTable({
-                startY: 35,
-                head: [['Date', 'Route/Location', 'Distance', 'Duration', 'Avg Pace']],
-                body: tableBody,
-                theme: 'striped',
-                headStyles: { fillColor: [50, 215, 75] }
-            });
-            doc.save(`Ride_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+        }).onsuccess = () => {
+            localStorage.removeItem('chan_session_dist');
+            localStorage.removeItem('chan_session_seconds');
+            localStorage.removeItem('chan_session_path');
+            recalculateTotal();
+            speak("Ride Saved. Well Done.");
+            setTimeout(() => location.reload(), 2000);
         };
     };
 
-    // Pocket Lock Logic
-    const lockOverlay = document.getElementById('pocketLock');
-    const unlockBtn = document.getElementById('unlockBtn');
-    let unlockTimer;
-    document.getElementById('lockBtn').onclick = () => { lockOverlay.style.display = 'flex'; };
-    const startUnlock = (e) => {
-        e.preventDefault();
-        unlockBtn.style.borderColor = "var(--neon-green)"; unlockBtn.style.color = "var(--neon-green)";
-        unlockBtn.style.transform = "scale(0.9)";
-        unlockTimer = setTimeout(() => { lockOverlay.style.display = 'none'; resetUnlockBtn(); }, 1500);
+    function recalculateTotal() {
+        const tx = db.transaction("rides", "readonly");
+        tx.objectStore("rides").getAll().onsuccess = (e) => {
+            totalDistance = e.target.result.reduce((sum, r) => sum + parseFloat(r.distance), 0);
+            localStorage.setItem('chan_accumulated_km', totalDistance);
+            updateDisplay();
+        };
+    }
+
+    document.getElementById('addManualRide').onclick = () => {
+        document.getElementById('manualTitle').innerText = "MANUAL ENTRY";
+        document.getElementById('editRideId').value = "";
+        document.getElementById('manualDate').value = new Date().toISOString().split('T')[0];
+        document.getElementById('manualLoc').value = "";
+        document.getElementById('manualDist').value = "";
+        document.getElementById('manualTime').value = "00:00:00";
+        document.getElementById('manualEntryModal').style.display = 'flex';
     };
-    const cancelUnlock = () => { clearTimeout(unlockTimer); resetUnlockBtn(); };
-    const resetUnlockBtn = () => { unlockBtn.style.borderColor = "#222"; unlockBtn.style.color = "#222"; unlockBtn.style.transform = "scale(1)"; };
-    unlockBtn.addEventListener('touchstart', startUnlock);
-    unlockBtn.addEventListener('touchend', cancelUnlock);
-    unlockBtn.addEventListener('mousedown', startUnlock);
-    unlockBtn.addEventListener('mouseup', cancelUnlock);
+
+    document.getElementById('saveManualBtn').onclick = () => {
+        const id = document.getElementById('editRideId').value;
+        const dateRaw = document.getElementById('manualDate').value;
+        const dist = document.getElementById('manualDist').value;
+        const time = document.getElementById('manualTime').value;
+        const loc = document.getElementById('manualLoc').value;
+
+        if(!dateRaw || !dist) return alert("Date and Distance required");
+
+        const formattedDate = dateRaw.split('-').reverse().join('/');
+        const tx = db.transaction("rides", "readwrite");
+        const store = tx.objectStore("rides");
+
+        const data = { 
+            date: formattedDate, 
+            distance: parseFloat(dist).toFixed(2), 
+            duration: time || "00:00:00",
+            location: loc || "MANUAL", 
+            pace: "MANUAL" 
+        };
+
+        const action = id ? store.put({...data, id: parseInt(id)}) : store.add(data);
+        action.onsuccess = () => {
+            document.getElementById('manualEntryModal').style.display = 'none';
+            recalculateTotal();
+            renderHistory();
+        };
+    };
+
+    window.editRide = (id) => {
+        db.transaction("rides", "readonly").objectStore("rides").get(id).onsuccess = (e) => {
+            const r = e.target.result;
+            document.getElementById('manualTitle').innerText = "EDIT RIDE";
+            document.getElementById('editRideId').value = r.id;
+            const dateParts = r.date.split('/');
+            document.getElementById('manualDate').value = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`;
+            document.getElementById('manualLoc').value = r.location;
+            document.getElementById('manualDist').value = r.distance;
+            document.getElementById('manualTime').value = r.duration;
+            document.getElementById('manualEntryModal').style.display = 'flex';
+        };
+    };
+
+    function renderHistory() {
+        const tx = db.transaction("rides", "readonly");
+        tx.objectStore("rides").getAll().onsuccess = (e) => {
+            const list = document.getElementById('lapList'), chart = document.getElementById('rideChart');
+            list.innerHTML = ""; chart.innerHTML = "";
+            const rides = e.target.result;
+            const maxDist = Math.max(...rides.map(r => parseFloat(r.distance))) || 1;
+            rides.forEach(ride => {
+                const bar = document.createElement('div'); bar.className = 'chart-bar';
+                bar.style.height = `${(parseFloat(ride.distance) / maxDist) * 100}%`;
+                bar.innerHTML = `<span class="bar-val">${ride.distance}</span>`;
+                chart.appendChild(bar);
+            });
+            rides.reverse().forEach(ride => {
+                const row = document.createElement('div'); row.className = "history-item";
+                row.innerHTML = `
+                    <div style="flex:1">
+                        <strong>${ride.date}</strong> | <small>${ride.location}</small><br>
+                        <span style="color:var(--neon-green); font-weight:800;">${ride.distance} KM</span> 
+                        <span style="color:#888; font-size:0.7rem; margin-left:10px;">${ride.duration}</span>
+                    </div>
+                    <div style="display:flex; gap:15px;">
+                        <span class="material-icons-round" onclick="editRide(${ride.id})" style="color:var(--warning-yellow); font-size:20px;">edit</span>
+                        <span class="material-icons-round" onclick="deleteRide(${ride.id})" style="color:var(--danger-red); font-size:20px;">delete</span>
+                    </div>`;
+                list.appendChild(row);
+            });
+        };
+    }
 
     function updateDisplay() {
         document.getElementById('distance').innerText = sessionDistance.toFixed(2);
-        let cur = totalDistance + sessionDistance;
+        let cur = totalDistance + (isPausedManually ? 0 : sessionDistance);
         document.getElementById('doneKm').innerText = cur.toFixed(2);
         if (targetGoal > 0) {
             document.getElementById('balKm').innerText = Math.max(targetGoal - cur, 0).toFixed(2);
             document.getElementById('progressBar').style.width = Math.min((cur / targetGoal) * 100, 100) + "%";
         }
-        const mins = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+        const hrs = Math.floor(totalSeconds / 3600).toString().padStart(2, '0');
+        const mins = Math.floor((totalSeconds % 3600) / 60).toString().padStart(2, '0');
         const secs = (totalSeconds % 60).toString().padStart(2, '0');
-        document.getElementById('timer').innerText = `${mins}:${secs}`;
-        if (sessionDistance > 0.01) {
-            let paceMin = (totalSeconds / 60) / sessionDistance;
-            document.getElementById('pace').innerText = `${Math.floor(paceMin)}'${Math.floor((paceMin % 1) * 60).toString().padStart(2, '0')}"`;
-        }
+        document.getElementById('timer').innerText = hrs !== "00" ? `${hrs}:${mins}:${secs}` : `${mins}:${secs}`;
     }
 
-    function checkVoiceMilestones() {
-        let currentMilestone = Math.floor(sessionDistance * 2) / 2;
-        if (currentMilestone > lastSpokenMilestone) {
-            lastSpokenMilestone = currentMilestone;
-            speak(`${currentMilestone} kilometers.`);
-        }
-    }
+    // Standard Handlers
+    document.getElementById('volSlider').oninput = (e) => speechVolume = e.target.value;
+    document.getElementById('openHistory').onclick = () => { document.getElementById('historyModal').style.display = 'flex'; renderHistory(); };
+    document.getElementById('closeHistory').onclick = () => document.getElementById('historyModal').style.display = 'none';
+    document.getElementById('editGoal').onclick = () => document.getElementById('goalModal').style.display = 'flex';
+    document.getElementById('saveGoal').onclick = () => {
+        localStorage.setItem('chan_target_km', document.getElementById('goalInput').value);
+        localStorage.setItem('chan_target_date', document.getElementById('dateInput').value);
+        location.reload();
+    };
+    document.getElementById('editLoc').onclick = () => document.getElementById('locModal').style.display = 'flex';
+    document.getElementById('saveLoc').onclick = () => {
+        localStorage.setItem('chan_ride_loc', document.getElementById('locInput').value);
+        location.reload();
+    };
+    document.getElementById('newRideBtn').onclick = () => { if(confirm("Wipe all data?")) { localStorage.clear(); location.reload(); } };
+    window.deleteRide = (id) => { if(confirm("Delete?")) db.transaction("rides", "readwrite").objectStore("rides").delete(id).onsuccess = () => { renderHistory(); recalculateTotal(); }; };
+    
+    // Unlock Logic
+    const lockOverlay = document.getElementById('pocketLock'), unlockBtn = document.getElementById('unlockBtn');
+    let unlockTimer;
+    document.getElementById('lockBtn').onclick = () => { lockOverlay.style.display = 'flex'; };
+    const startUnlock = (e) => {
+        e.preventDefault();
+        unlockBtn.style.borderColor = "var(--neon-green)"; unlockBtn.style.transform = "scale(0.9)";
+        unlockTimer = setTimeout(() => { lockOverlay.style.display = 'none'; resetUnlockBtn(); resetAutoLockTimer(); }, 1500);
+    };
+    const resetUnlockBtn = () => { unlockBtn.style.borderColor = "#222"; unlockBtn.style.transform = "scale(1)"; clearTimeout(unlockTimer); };
+    unlockBtn.addEventListener('touchstart', startUnlock);
+    unlockBtn.addEventListener('touchend', resetUnlockBtn);
 
     function updateGpsIcon(accuracy) {
-        const icon = document.getElementById('gpsIcon');
-        const accDisplay = document.getElementById('accDisplay');
+        const icon = document.getElementById('gpsIcon'), accDisplay = document.getElementById('accDisplay');
         if (accuracy < 25) { 
             icon.classList.add('sig-good'); accDisplay.innerText = `ACCURACY: ${accuracy.toFixed(0)}M (LOCKED)`; 
             accDisplay.style.color = "var(--accent-blue)"; 
@@ -466,45 +540,6 @@
         else { mapEl.style.display = 'none'; }
         if (mapState !== 2) setTimeout(() => map.invalidateSize(), 200);
     };
-
-    document.getElementById('openHistory').onclick = () => { document.getElementById('historyModal').style.display = 'flex'; renderHistory(); };
-    document.getElementById('closeHistory').onclick = () => document.getElementById('historyModal').style.display = 'none';
-    document.getElementById('editGoal').onclick = () => document.getElementById('goalModal').style.display = 'flex';
-    document.getElementById('saveGoal').onclick = () => {
-        localStorage.setItem('chan_target_km', document.getElementById('goalInput').value);
-        localStorage.setItem('chan_target_date', document.getElementById('dateInput').value);
-        location.reload();
-    };
-    document.getElementById('editLoc').onclick = () => document.getElementById('locModal').style.display = 'flex';
-    document.getElementById('saveLoc').onclick = () => {
-        localStorage.setItem('chan_ride_loc', document.getElementById('locInput').value);
-        location.reload();
-    };
-    document.getElementById('newRideBtn').onclick = () => { if(confirm("Wipe all data?")) { speak("Health is wealth"); localStorage.clear(); setTimeout(() => location.reload(), 2000); } };
-
-    function renderHistory() {
-        const tx = db.transaction("rides", "readonly");
-        const req = tx.objectStore("rides").getAll();
-        req.onsuccess = () => {
-            const list = document.getElementById('lapList'), chart = document.getElementById('rideChart');
-            list.innerHTML = ""; chart.innerHTML = "";
-            const rides = req.result;
-            const maxDist = Math.max(...rides.map(r => parseFloat(r.distance))) || 1;
-            rides.forEach(ride => {
-                const bar = document.createElement('div'); bar.className = 'chart-bar';
-                bar.style.height = `${(parseFloat(ride.distance) / maxDist) * 100}%`;
-                bar.innerHTML = `<span class="bar-val">${ride.distance}</span>`;
-                chart.appendChild(bar);
-            });
-            rides.reverse().forEach(ride => {
-                const row = document.createElement('div'); row.className = "history-item";
-                row.innerHTML = `<div><strong>${ride.date}</strong><br>${ride.distance} KM</div>
-                                 <span class="material-icons-round" onclick="deleteRide(${ride.id})" style="color:var(--danger-red);">delete</span>`;
-                list.appendChild(row);
-            });
-        };
-    }
-    window.deleteRide = (id) => { if(confirm("Delete?")) db.transaction("rides", "readwrite").objectStore("rides").delete(id).onsuccess = renderHistory; };
 </script>
 </body>
 </html>

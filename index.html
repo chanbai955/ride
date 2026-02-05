@@ -242,6 +242,7 @@
     </div>
 
 <script>
+    // --- GLOBAL VARIABLES ---
     let totalDistance = parseFloat(localStorage.getItem('chan_accumulated_km')) || 0;
     let targetGoal = parseFloat(localStorage.getItem('chan_target_km')) || 0;
     let targetDate = localStorage.getItem('chan_target_date') || "";
@@ -259,26 +260,26 @@
     let map, routeLine, currentMarker, streetTiles, satelliteTiles;
     let mapState = 2;
 
-    // VOICE SYSTEM
+    // --- SPEECH SYSTEM ---
     function speak(t) { 
         window.speechSynthesis.cancel(); 
         const msg = new SpeechSynthesisUtterance(t);
         msg.volume = speechVolume;
-        msg.rate = 0.9;
+        msg.rate = 0.95;
         window.speechSynthesis.speak(msg); 
     }
 
-    // WAKE LOCK (KEEP SCREEN ON)
+    // --- WAKE LOCK (KEEP SCREEN ON) ---
     async function requestWakeLock() {
         if ('wakeLock' in navigator) {
             try { wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {}
         }
     }
-
     function releaseWakeLock() {
         if (wakeLock) { wakeLock.release(); wakeLock = null; }
     }
 
+    // --- DATABASE INIT ---
     const dbReq = indexedDB.open("rideProEliteDB", 5);
     dbReq.onupgradeneeded = (e) => {
         let db = e.target.result;
@@ -303,6 +304,7 @@
         currentMarker = L.circleMarker([0, 0], {radius: 8, color: '#0A84FF', fillColor: '#0A84FF', fillOpacity: 1}).addTo(map);
     }
 
+    // --- GPS LOGIC (RESTORED FIX) ---
     function startGlobalWatcher() {
         watchID = navigator.geolocation.watchPosition(pos => {
             const { latitude: lat, longitude: lng, accuracy } = pos.coords;
@@ -331,6 +333,7 @@
         }, null, {enableHighAccuracy: true, maximumAge: 1000});
     }
 
+    // --- START/STOP LOGIC ---
     function startRide() {
         isPausedManually = false;
         requestWakeLock();
@@ -379,10 +382,115 @@
             localStorage.removeItem('chan_session_path');
             recalculateTotal();
             speak("Ride Saved. Well Done.");
-            setTimeout(() => location.reload(), 1500);
+            setTimeout(() => location.reload(), 1000);
         };
     };
 
+    // --- MANUAL ENTRY & HISTORY LOGICS (RESTORED) ---
+    document.getElementById('addManualRide').onclick = () => {
+        document.getElementById('manualTitle').innerText = "MANUAL ENTRY";
+        document.getElementById('editRideId').value = "";
+        document.getElementById('manualDate').value = new Date().toISOString().split('T')[0];
+        document.getElementById('manualLoc').value = "";
+        document.getElementById('manualDist').value = "";
+        document.getElementById('manualTime').value = "00:00:00";
+        document.getElementById('manualEntryModal').style.display = 'flex';
+    };
+
+    document.getElementById('saveManualBtn').onclick = () => {
+        const id = document.getElementById('editRideId').value;
+        const dateRaw = document.getElementById('manualDate').value;
+        const dist = document.getElementById('manualDist').value;
+        const time = document.getElementById('manualTime').value;
+        const loc = document.getElementById('manualLoc').value;
+
+        if(!dateRaw || !dist) return alert("Date and Distance required");
+
+        const formattedDate = dateRaw.split('-').reverse().join('/');
+        const tx = db.transaction("rides", "readwrite");
+        const store = tx.objectStore("rides");
+
+        const data = { 
+            date: formattedDate, 
+            distance: parseFloat(dist).toFixed(2), 
+            duration: time || "00:00:00",
+            location: loc || "MANUAL", 
+            pace: "MANUAL" 
+        };
+
+        const action = id ? store.put({...data, id: parseInt(id)}) : store.add(data);
+        action.onsuccess = () => {
+            document.getElementById('manualEntryModal').style.display = 'none';
+            recalculateTotal();
+            renderHistory();
+        };
+    };
+
+    window.editRide = (id) => {
+        db.transaction("rides", "readonly").objectStore("rides").get(id).onsuccess = (e) => {
+            const r = e.target.result;
+            document.getElementById('manualTitle').innerText = "EDIT RIDE";
+            document.getElementById('editRideId').value = r.id;
+            const parts = r.date.split('/');
+            document.getElementById('manualDate').value = `${parts[2]}-${parts[1]}-${parts[0]}`;
+            document.getElementById('manualLoc').value = r.location;
+            document.getElementById('manualDist').value = r.distance;
+            document.getElementById('manualTime').value = r.duration;
+            document.getElementById('manualEntryModal').style.display = 'flex';
+        };
+    };
+
+    function renderHistory() {
+        const tx = db.transaction("rides", "readonly");
+        tx.objectStore("rides").getAll().onsuccess = (e) => {
+            const list = document.getElementById('lapList'), chart = document.getElementById('rideChart');
+            list.innerHTML = ""; chart.innerHTML = "";
+            const rides = e.target.result;
+            const maxDist = Math.max(...rides.map(r => parseFloat(r.distance))) || 1;
+            
+            rides.forEach(ride => {
+                const bar = document.createElement('div'); bar.className = 'chart-bar';
+                bar.style.height = `${(parseFloat(ride.distance) / maxDist) * 100}%`;
+                bar.innerHTML = `<span class="bar-val">${ride.distance}</span>`;
+                chart.appendChild(bar);
+            });
+
+            rides.reverse().forEach(ride => {
+                const row = document.createElement('div'); row.className = "history-item";
+                row.innerHTML = `
+                    <div style="flex:1">
+                        <strong>${ride.date}</strong> | <small>${ride.location}</small><br>
+                        <span style="color:var(--neon-green); font-weight:800;">${ride.distance} KM</span> 
+                        <span style="color:#888; font-size:0.7rem; margin-left:10px;">${ride.duration}</span>
+                    </div>
+                    <div style="display:flex; gap:15px;">
+                        <span class="material-icons-round" onclick="editRide(${ride.id})" style="color:var(--warning-yellow); font-size:20px; cursor:pointer;">edit</span>
+                        <span class="material-icons-round" onclick="deleteRide(${ride.id})" style="color:var(--danger-red); font-size:20px; cursor:pointer;">delete</span>
+                    </div>`;
+                list.appendChild(row);
+            });
+        };
+    }
+
+    // --- PDF EXPORT (RESTORED) ---
+    document.getElementById('exportPdf').onclick = () => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        doc.setFontSize(18); doc.text("CHANTHIRAN RIDE REPORT", 14, 20);
+        
+        db.transaction("rides", "readonly").objectStore("rides").getAll().onsuccess = (e) => {
+            const data = e.target.result.map(r => [r.date, r.location, r.distance + " KM", r.duration]);
+            doc.autoTable({
+                startY: 30,
+                head: [['Date', 'Location', 'Distance', 'Time']],
+                body: data,
+                theme: 'striped'
+            });
+            doc.save(`Rides_Report_${new Date().toLocaleDateString()}.pdf`);
+        };
+    };
+
+    // --- UI UPDATES ---
     function updateDisplay() {
         document.getElementById('distance').innerText = sessionDistance.toFixed(2);
         let cur = totalDistance + (isPausedManually ? 0 : sessionDistance);
@@ -396,7 +504,6 @@
         const secs = (totalSeconds % 60).toString().padStart(2, '0');
         document.getElementById('timer').innerText = hrs !== "00" ? `${hrs}:${mins}:${secs}` : `${mins}:${secs}`;
         
-        // Pace calculation
         if(sessionDistance > 0.05) {
             const minPerKm = (totalSeconds / 60) / sessionDistance;
             const pMin = Math.floor(minPerKm);
@@ -414,7 +521,7 @@
         };
     }
 
-    // MODAL HANDLERS
+    // --- UTILITY HANDLERS ---
     document.getElementById('volSlider').oninput = (e) => speechVolume = e.target.value;
     document.getElementById('openHistory').onclick = () => { document.getElementById('historyModal').style.display = 'flex'; renderHistory(); };
     document.getElementById('closeHistory').onclick = () => document.getElementById('historyModal').style.display = 'none';
@@ -430,8 +537,9 @@
         location.reload();
     };
     document.getElementById('newRideBtn').onclick = () => { if(confirm("Wipe all data?")) { localStorage.clear(); location.reload(); } };
+    window.deleteRide = (id) => { if(confirm("Delete?")) db.transaction("rides", "readwrite").objectStore("rides").delete(id).onsuccess = () => { renderHistory(); recalculateTotal(); }; };
 
-    // POCKET LOCK (MANUAL ONLY)
+    // --- POCKET LOCK (MANUAL ONLY) ---
     const lockOverlay = document.getElementById('pocketLock'), unlockBtn = document.getElementById('unlockBtn');
     let unlockTimer;
     document.getElementById('lockBtn').onclick = () => { lockOverlay.style.display = 'flex'; };
@@ -462,37 +570,6 @@
         document.getElementById('balDateDisplay').innerText = `DUE: ${targetDate.split('-').reverse().join('/')}`;
         document.getElementById('daysLeftDisplay').innerText = diffDays < 0 ? "OVERDUE" : `${diffDays} DAYS LEFT`;
     }
-
-    function renderHistory() {
-        const tx = db.transaction("rides", "readonly");
-        tx.objectStore("rides").getAll().onsuccess = (e) => {
-            const list = document.getElementById('lapList'), chart = document.getElementById('rideChart');
-            list.innerHTML = ""; chart.innerHTML = "";
-            const rides = e.target.result;
-            const maxDist = Math.max(...rides.map(r => parseFloat(r.distance))) || 1;
-            rides.forEach(ride => {
-                const bar = document.createElement('div'); bar.className = 'chart-bar';
-                bar.style.height = `${(parseFloat(ride.distance) / maxDist) * 100}%`;
-                bar.innerHTML = `<span class="bar-val">${ride.distance}</span>`;
-                chart.appendChild(bar);
-            });
-            rides.reverse().forEach(ride => {
-                const row = document.createElement('div'); row.className = "history-item";
-                row.innerHTML = `
-                    <div style="flex:1">
-                        <strong>${ride.date}</strong> | <small>${ride.location}</small><br>
-                        <span style="color:var(--neon-green); font-weight:800;">${ride.distance} KM</span> 
-                        <span style="color:#888; font-size:0.7rem; margin-left:10px;">${ride.duration}</span>
-                    </div>
-                    <div style="display:flex; gap:15px;">
-                        <span class="material-icons-round" onclick="deleteRide(${ride.id})" style="color:var(--danger-red); font-size:20px;">delete</span>
-                    </div>`;
-                list.appendChild(row);
-            });
-        };
-    }
-
-    window.deleteRide = (id) => { if(confirm("Delete?")) db.transaction("rides", "readwrite").objectStore("rides").delete(id).onsuccess = () => { renderHistory(); recalculateTotal(); }; };
 
     document.getElementById('mapLoopBtn').onclick = function() {
         mapState = (mapState + 1) % 3;

@@ -334,12 +334,24 @@
         document.getElementById('headerRideIcon').classList.remove('riding-pulse');
     }
 
-    document.getElementById('startBtn').onclick = () => {
-        if (document.getElementById('startIcon').innerText === "pause") {
-            isPausedManually = true; pauseRide(); speak("Ride paused.");
-        } else { startRide(); speak("ride resumed."); }
-    };
-
+   document.getElementById('startBtn').onclick = () => {
+    const startIcon = document.getElementById('startIcon');
+    
+    if (startIcon.innerText === "pause") {
+        // Handle Manual Pause
+        isPausedManually = true;
+        pauseRide();
+        speak("Ride paused.");
+    } else {
+        // Determine if this is a brand new start or a resume from pause
+        if (sessionDistance === 0 && totalSeconds === 0) {
+            speak("Enjoy your ride.");
+        } else {
+            speak("Ride resumed.");
+        }
+        startRide();
+    }
+};
     document.getElementById('stopBtn').onclick = async () => {
         if(!confirm("Finish and Save?")) return;
         pauseRide();

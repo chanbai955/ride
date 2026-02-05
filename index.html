@@ -105,6 +105,15 @@
             background: transparent; border: 2px solid #222; color: #222; width: 120px; height: 120px; 
             border-radius: 50%; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center;
         }
+
+        /* Short Blue Volume Bar */
+        .vol-container { width: 60% !important; margin: 5px auto 15px auto; }
+        #volSlider { -webkit-appearance: none; width: 100%; height: 6px; background: #333; border-radius: 5px; outline: none; }
+        #volSlider::-webkit-slider-runnable-track { width: 100%; height: 6px; cursor: pointer; background: #0A84FF; border-radius: 5px; }
+        #volSlider::-webkit-slider-thumb { 
+            height: 18px; width: 18px; border-radius: 50%; background: #0A84FF; 
+            cursor: pointer; -webkit-appearance: none; margin-top: -6px; box-shadow: 0 0 5px rgba(0,0,0,0.5); 
+        }
     </style>
 </head>
 <body>
@@ -112,11 +121,7 @@
     <div class="header">
         <div class="header-info">
             <span id="fullDate">--/--/----</span>
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <span id="liveClock">00:00:00</span>
-                <span id="battLevel" style="font-size: 0.8rem; color: var(--neon-green); font-weight: 800;">--%</span>
-                <span id="battIcon" class="material-icons-round" style="font-size: 14px; opacity: 0.6;">battery_full</span>
-            </div>
+            <span id="liveClock">00:00:00</span>
         </div>
         <div class="title-container">
             <span id="headerRideIcon" class="material-icons-round" style="color: var(--neon-green); font-size: 2.2rem;">directions_bike</span>
@@ -154,14 +159,15 @@
             <span id="balDateDisplay">DUE: NOT SET</span>
             <span id="daysLeftDisplay"></span>
         </div>
+
         <div style="width: 90%; display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
             <span class="material-icons-round" id="editLoc" style="color: var(--accent-blue); cursor:pointer;">place</span>
             <span id="locDisplay" style="font-size: 0.8rem; color: var(--accent-blue); font-weight: 800; text-transform: uppercase;">NOT SET</span>
         </div>
 
-        <div style="width: 90%; display: flex; align-items: center; gap: 10px; margin-top: 5px; margin-bottom: 10px;">
-            <span class="material-icons-round" style="font-size: 18px; color: #666;">volume_up</span>
-            <input type="range" id="volSlider" min="0" max="1" step="0.1" value="1" style="flex: 1; accent-color: var(--neon-green);">
+        <div class="vol-container" style="display: flex; align-items: center; gap: 10px;">
+            <span class="material-icons-round" style="font-size: 18px; color: #0A84FF;">volume_up</span>
+            <input type="range" id="volSlider" min="0" max="1" step="0.1" value="1">
         </div>
 
         <div id="accDisplay" style="font-size: 0.6rem; font-weight: 900; margin-bottom: 15px; opacity: 0.8;">GPS SEARCHING...</div>
@@ -179,7 +185,6 @@
     </div>
 
     <div id="pocketLock">
-        <div id="lockBatt" style="position: absolute; top: 40px; font-size: 1.2rem; color: #333; font-weight: 900;">--% BATT</div>
         <p style="color:#222; font-weight:900; letter-spacing:4px; margin-bottom: 20px;">POCKET MODE ACTIVE</p>
         <button id="unlockBtn">
             <span class="material-icons-round" style="font-size:3rem;">lock_open</span>
@@ -219,7 +224,6 @@
     </div>
 
 <script>
-    // State Variables
     let totalDistance = parseFloat(localStorage.getItem('chan_accumulated_km')) || 0;
     let targetGoal = parseFloat(localStorage.getItem('chan_target_km')) || 0;
     let targetDate = localStorage.getItem('chan_target_date') || "";
@@ -236,9 +240,8 @@
 
     let watchID, timerInterval, db, wakeLock = null;
     let map, routeLine, currentMarker, streetTiles, satelliteTiles;
-    let mapState = 2; // 0: Street, 1: Satellite, 2: Hidden
+    let mapState = 2;
 
-    // --- Core Speech Engine ---
     function speak(t) { 
         window.speechSynthesis.cancel(); 
         const msg = new SpeechSynthesisUtterance(t);
@@ -248,22 +251,6 @@
 
     document.getElementById('volSlider').oninput = (e) => { speechVolume = e.target.value; };
 
-    // --- Battery Logic ---
-    async function initBattery() {
-        try {
-            const battery = await navigator.getBattery();
-            const updateBatt = () => {
-                const level = Math.round(battery.level * 100) + "%";
-                document.getElementById('battLevel').innerText = level;
-                document.getElementById('lockBatt').innerText = level + " BATT";
-                document.getElementById('battLevel').style.color = battery.level < 0.2 ? "var(--danger-red)" : "var(--neon-green)";
-            };
-            updateBatt();
-            battery.addEventListener('levelchange', updateBatt);
-        } catch (e) { console.log("Battery API not supported"); }
-    }
-
-    // --- Database Setup ---
     const dbReq = indexedDB.open("rideProEliteDB", 5);
     dbReq.onupgradeneeded = (e) => {
         let db = e.target.result;
@@ -273,7 +260,6 @@
 
     window.onload = () => {
         initMap();
-        initBattery();
         updateDisplay();
         checkGoalStatus();
         document.getElementById('fullDate').innerText = new Date().toLocaleDateString('en-GB');
@@ -289,19 +275,16 @@
         currentMarker = L.circleMarker([0, 0], {radius: 8, color: '#0A84FF', fillColor: '#0A84FF', fillOpacity: 1}).addTo(map);
     }
 
-    // --- Tracking Logic ---
     function startGlobalWatcher() {
         watchID = navigator.geolocation.watchPosition(pos => {
             const { latitude: lat, longitude: lng, accuracy, speed } = pos.coords;
             if(currentMarker) currentMarker.setLatLng([lat, lng]);
             updateGpsIcon(accuracy);
-
             const currentSpeedKmh = (speed || 0) * 3.6;
 
-            // Auto-Resume Logic
             if (!timerInterval && !isPausedManually && currentSpeedKmh > 5) {
                 startRide();
-                speak("Movement detected. Resuming ride.");
+                speak("Resuming ride.");
             }
 
             if (timerInterval && accuracy <= 40) {
@@ -311,9 +294,8 @@
                     const dLon = (lng - lastCoords.lng) * Math.PI/180;
                     const a = Math.sin(dLat/2)**2 + Math.cos(lastCoords.lat * Math.PI/180) * Math.cos(lat * Math.PI/180) * Math.sin(dLon/2)**2;
                     const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-                    
                     if (d > 0.005) { 
-                        stationaryTime = 0; // Reset auto-pause timer
+                        stationaryTime = 0;
                         sessionDistance += d;
                         ridePath.push([lat, lng]);
                         routeLine.addLatLng([lat, lng]);
@@ -334,15 +316,11 @@
         document.getElementById('startIcon').innerText = "pause";
         document.getElementById('stopBtn').classList.remove('hidden');
         document.getElementById('headerRideIcon').classList.add('riding-pulse');
-        
         if (!timerInterval) {
             timerInterval = setInterval(() => {
                 totalSeconds++;
                 stationaryTime++;
-                if (stationaryTime > 120) { 
-                    pauseRide();
-                    speak("Ride auto paused.");
-                }
+                if (stationaryTime > 120) { pauseRide(); speak("Ride paused."); }
                 localStorage.setItem('chan_session_seconds', totalSeconds);
                 updateDisplay();
             }, 1000);
@@ -358,70 +336,46 @@
 
     document.getElementById('startBtn').onclick = () => {
         if (document.getElementById('startIcon').innerText === "pause") {
-            isPausedManually = true;
-            pauseRide();
-            speak("Ride paused.");
-        } else {
-            startRide();
-            speak("Enjoy your ride.");
-        }
+            isPausedManually = true; pauseRide(); speak("Ride paused.");
+        } else { startRide(); speak("ride resumed."); }
     };
 
     document.getElementById('stopBtn').onclick = async () => {
         if(!confirm("Finish and Save?")) return;
         pauseRide();
         const finalDist = sessionDistance.toFixed(2);
-        
         const tx = db.transaction("rides", "readwrite");
         tx.objectStore("rides").add({ 
             date: document.getElementById('fullDate').innerText, 
-            distance: finalDist, 
-            duration: document.getElementById('timer').innerText, 
-            pace: document.getElementById('pace').innerText,
-            location: rideLocation, route: ridePath 
+            distance: finalDist, duration: document.getElementById('timer').innerText, 
+            pace: document.getElementById('pace').innerText, location: rideLocation, route: ridePath 
         });
-
         totalDistance += sessionDistance;
         localStorage.setItem('chan_accumulated_km', totalDistance);
         localStorage.removeItem('chan_session_dist');
         localStorage.removeItem('chan_session_seconds');
         localStorage.removeItem('chan_session_path');
-
         speak(`Run Completed And Saved. Your final distance is ${finalDist} kilometers. Well Done Chanthiran.`);
         setTimeout(() => location.reload(), 4000);
     };
 
-    // --- Pocket Lock Logic ---
     const lockOverlay = document.getElementById('pocketLock');
     const unlockBtn = document.getElementById('unlockBtn');
     let unlockTimer;
-
     document.getElementById('lockBtn').onclick = () => { lockOverlay.style.display = 'flex'; };
-
     const startUnlock = (e) => {
         e.preventDefault();
-        unlockBtn.style.borderColor = "var(--neon-green)";
-        unlockBtn.style.color = "var(--neon-green)";
+        unlockBtn.style.borderColor = "var(--neon-green)"; unlockBtn.style.color = "var(--neon-green)";
         unlockBtn.style.transform = "scale(0.9)";
-        unlockTimer = setTimeout(() => {
-            lockOverlay.style.display = 'none';
-            resetUnlockBtn();
-        }, 1500);
+        unlockTimer = setTimeout(() => { lockOverlay.style.display = 'none'; resetUnlockBtn(); }, 1500);
     };
-
     const cancelUnlock = () => { clearTimeout(unlockTimer); resetUnlockBtn(); };
-    const resetUnlockBtn = () => {
-        unlockBtn.style.borderColor = "#222";
-        unlockBtn.style.color = "#222";
-        unlockBtn.style.transform = "scale(1)";
-    };
-
+    const resetUnlockBtn = () => { unlockBtn.style.borderColor = "#222"; unlockBtn.style.color = "#222"; unlockBtn.style.transform = "scale(1)"; };
     unlockBtn.addEventListener('touchstart', startUnlock);
     unlockBtn.addEventListener('touchend', cancelUnlock);
     unlockBtn.addEventListener('mousedown', startUnlock);
     unlockBtn.addEventListener('mouseup', cancelUnlock);
 
-    // --- UI Update Helpers ---
     function updateDisplay() {
         document.getElementById('distance').innerText = sessionDistance.toFixed(2);
         let cur = totalDistance + sessionDistance;
@@ -433,7 +387,6 @@
         const mins = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
         const secs = (totalSeconds % 60).toString().padStart(2, '0');
         document.getElementById('timer').innerText = `${mins}:${secs}`;
-        
         if (sessionDistance > 0.01) {
             let paceMin = (totalSeconds / 60) / sessionDistance;
             document.getElementById('pace').innerText = `${Math.floor(paceMin)}'${Math.floor((paceMin % 1) * 60).toString().padStart(2, '0')}"`;
@@ -452,12 +405,10 @@
         const icon = document.getElementById('gpsIcon');
         const accDisplay = document.getElementById('accDisplay');
         if (accuracy < 25) { 
-            icon.classList.add('sig-good'); 
-            accDisplay.innerText = `ACCURACY: ${accuracy.toFixed(0)}M (LOCKED)`; 
+            icon.classList.add('sig-good'); accDisplay.innerText = `ACCURACY: ${accuracy.toFixed(0)}M (LOCKED)`; 
             accDisplay.style.color = "var(--accent-blue)"; 
         } else { 
-            icon.classList.remove('sig-good'); 
-            accDisplay.innerText = `ACCURACY: ${accuracy.toFixed(0)}M (SEARCHING)`; 
+            icon.classList.remove('sig-good'); accDisplay.innerText = `ACCURACY: ${accuracy.toFixed(0)}M (SEARCHING)`; 
             accDisplay.style.color = "var(--warning-yellow)"; 
         }
     }
@@ -470,23 +421,15 @@
         document.getElementById('daysLeftDisplay').innerText = diffDays < 0 ? "OVERDUE" : `${diffDays} DAYS LEFT`;
     }
 
-    // Map Switching
     document.getElementById('mapLoopBtn').onclick = function() {
         mapState = (mapState + 1) % 3;
         const mapEl = document.getElementById('map');
-        if (mapState === 0) {
-            mapEl.style.display = 'block';
-            map.removeLayer(satelliteTiles);
-            streetTiles.addTo(map);
-        } else if (mapState === 1) {
-            mapEl.style.display = 'block';
-            map.removeLayer(streetTiles);
-            satelliteTiles.addTo(map);
-        } else { mapEl.style.display = 'none'; }
+        if (mapState === 0) { mapEl.style.display = 'block'; map.removeLayer(satelliteTiles); streetTiles.addTo(map); }
+        else if (mapState === 1) { mapEl.style.display = 'block'; map.removeLayer(streetTiles); satelliteTiles.addTo(map); }
+        else { mapEl.style.display = 'none'; }
         if (mapState !== 2) setTimeout(() => map.invalidateSize(), 200);
     };
 
-    // Modal Controls
     document.getElementById('openHistory').onclick = () => { document.getElementById('historyModal').style.display = 'flex'; renderHistory(); };
     document.getElementById('closeHistory').onclick = () => document.getElementById('historyModal').style.display = 'none';
     document.getElementById('editGoal').onclick = () => document.getElementById('goalModal').style.display = 'flex';
@@ -500,7 +443,7 @@
         localStorage.setItem('chan_ride_loc', document.getElementById('locInput').value);
         location.reload();
     };
-    document.getElementById('newRideBtn').onclick = () => { if(confirm("Wipe all data?")) { speak("Health is wealth"); localStorage.clear(); setTimeout(() => location.reload(), 2000); } };
+    document.getElementById('newRideBtn').onclick = () => { if(confirm("Wipe all data?")) { speak("Its a New Run. Run for Health"); localStorage.clear(); setTimeout(() => location.reload(), 2000); } };
 
     function renderHistory() {
         const tx = db.transaction("rides", "readonly");

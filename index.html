@@ -57,9 +57,9 @@
         #gpsIcon { font-size: 24px; transition: all 0.3s ease; color: #333; }
         .sig-good { color: var(--accent-blue) !important; }
 
-        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; width: 100%; margin-top: 30px; text-align: center; z-index: 10; }
-        .stat-box h2 { margin: 0; font-size: 2rem; }
-        .stat-box p { margin: 5px 0; font-size: 0.7rem; color: #888; font-weight: bold; }
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; width: 100%; margin-top: 30px; text-align: center; z-index: 10; }
+        .stat-box h2 { margin: 0; font-size: 1.8rem; }
+        .stat-box p { margin: 5px 0; font-size: 0.6rem; color: #888; font-weight: bold; }
 
         /* CONTROLS */
         .controls-bar { background: #121212; padding: 20px 20px 140px 20px; display: flex; flex-direction: column; align-items: center; border-top: 1px solid #1c1c1e; border-radius: 45px 45px 0 0; z-index: 100; }
@@ -139,6 +139,7 @@
         </div>
         <div class="stats-grid">
             <div class="stat-box"> <h2 id="timer">00:00</h2> <p>TIME</p> </div>
+            <div class="stat-box"> <h2 id="speed">0.0</h2> <p>KM/H</p> </div>
             <div class="stat-box"> <h2 id="pace">0'00"</h2> <p>PACE</p> </div>
         </div>
     </div>
@@ -269,7 +270,7 @@
         window.speechSynthesis.speak(msg); 
     }
 
-    // --- WAKE LOCK (KEEP SCREEN ON) ---
+    // --- WAKE LOCK ---
     async function requestWakeLock() {
         if ('wakeLock' in navigator) {
             try { wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {}
@@ -304,36 +305,52 @@
         currentMarker = L.circleMarker([0, 0], {radius: 8, color: '#0A84FF', fillColor: '#0A84FF', fillOpacity: 1}).addTo(map);
     }
 
-    // --- GPS LOGIC (RESTORED FIX) ---
+    // --- GPS LOGIC (FIXED FOR 12KM ERROR) ---
     function startGlobalWatcher() {
         watchID = navigator.geolocation.watchPosition(pos => {
             const { latitude: lat, longitude: lng, accuracy } = pos.coords;
             if(currentMarker) currentMarker.setLatLng([lat, lng]);
             updateGpsIcon(accuracy);
 
-            if (!lastCoords) { lastCoords = {lat, lng}; return; }
+            // Filter out inaccurate GPS spikes
+            if (accuracy > 35) return; 
 
-            if (!isPausedManually && accuracy <= 60) {
+            if (!lastCoords) { 
+                lastCoords = {lat, lng, timestamp: pos.timestamp}; 
+                return; 
+            }
+
+            if (!isPausedManually) {
                 const R = 6371;
                 const dLat = (lat - lastCoords.lat) * Math.PI/180;
                 const dLon = (lng - lastCoords.lng) * Math.PI/180;
                 const a = Math.sin(dLat/2)**2 + Math.cos(lastCoords.lat * Math.PI/180) * Math.cos(lat * Math.PI/180) * Math.sin(dLon/2)**2;
                 const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
                 
-                if (d > 0.003) { 
+                // Calculate Speed
+                const timeDiff = (pos.timestamp - lastCoords.timestamp) / 1000; // seconds
+                const speedKmh = d / (timeDiff / 3600);
+
+                // FILTERS: Move > 5m AND Speed < 80km/h (prevents 12km spikes)
+                if (d > 0.005 && speedKmh < 80) { 
                     sessionDistance += d;
                     ridePath.push([lat, lng]);
                     routeLine.addLatLng([lat, lng]);
+                    
+                    document.getElementById('speed').innerText = speedKmh.toFixed(1);
+                    
                     localStorage.setItem('chan_session_dist', sessionDistance);
                     localStorage.setItem('chan_session_path', JSON.stringify(ridePath));
                     updateDisplay();
-                    lastCoords = {lat, lng};
+                    lastCoords = {lat, lng, timestamp: pos.timestamp};
+                } else {
+                    document.getElementById('speed').innerText = "0.0";
                 }
             }
-        }, null, {enableHighAccuracy: true, maximumAge: 1000});
+        }, null, {enableHighAccuracy: true, maximumAge: 0, timeout: 5000});
     }
 
-    // --- START/STOP LOGIC ---
+    // --- START/STOP ---
     function startRide() {
         isPausedManually = false;
         requestWakeLock();
@@ -356,6 +373,7 @@
         releaseWakeLock();
         document.getElementById('startIcon').innerText = "play_arrow";
         document.getElementById('headerRideIcon').classList.remove('riding-pulse');
+        document.getElementById('speed').innerText = "0.0";
     }
 
     document.getElementById('startBtn').onclick = () => {
@@ -386,7 +404,7 @@
         };
     };
 
-    // --- MANUAL ENTRY & HISTORY LOGICS (RESTORED) ---
+    // --- MANUAL ENTRY & HISTORY ---
     document.getElementById('addManualRide').onclick = () => {
         document.getElementById('manualTitle').innerText = "MANUAL ENTRY";
         document.getElementById('editRideId').value = "";
@@ -472,20 +490,13 @@
         };
     }
 
-    // --- PDF EXPORT (RESTORED) ---
     document.getElementById('exportPdf').onclick = () => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
         doc.setFontSize(18); doc.text("CHANTHIRAN RIDE REPORT", 14, 20);
-        
         db.transaction("rides", "readonly").objectStore("rides").getAll().onsuccess = (e) => {
             const data = e.target.result.map(r => [r.date, r.location, r.distance + " KM", r.duration]);
-            doc.autoTable({
-                startY: 30,
-                head: [['Date', 'Location', 'Distance', 'Time']],
-                body: data,
-                theme: 'striped'
-            });
+            doc.autoTable({ startY: 30, head: [['Date', 'Location', 'Distance', 'Time']], body: data, theme: 'striped' });
             doc.save(`Rides_Report_${new Date().toLocaleDateString()}.pdf`);
         };
     };
@@ -521,7 +532,7 @@
         };
     }
 
-    // --- UTILITY HANDLERS ---
+    // --- UTILS ---
     document.getElementById('volSlider').oninput = (e) => speechVolume = e.target.value;
     document.getElementById('openHistory').onclick = () => { document.getElementById('historyModal').style.display = 'flex'; renderHistory(); };
     document.getElementById('closeHistory').onclick = () => document.getElementById('historyModal').style.display = 'none';
@@ -539,7 +550,7 @@
     document.getElementById('newRideBtn').onclick = () => { if(confirm("Wipe all data?")) { localStorage.clear(); location.reload(); } };
     window.deleteRide = (id) => { if(confirm("Delete?")) db.transaction("rides", "readwrite").objectStore("rides").delete(id).onsuccess = () => { renderHistory(); recalculateTotal(); }; };
 
-    // --- POCKET LOCK (MANUAL ONLY) ---
+    // --- POCKET LOCK ---
     const lockOverlay = document.getElementById('pocketLock'), unlockBtn = document.getElementById('unlockBtn');
     let unlockTimer;
     document.getElementById('lockBtn').onclick = () => { lockOverlay.style.display = 'flex'; };

@@ -257,7 +257,6 @@
     let lastCoords = null; 
     let wakeLock = null;
 
-    // Voice tracking
     let lastHalfKmSpoken = Math.floor(sessionDistance / 0.5);
     let lastFullKmSpoken = Math.floor(sessionDistance / 1.0);
 
@@ -334,13 +333,11 @@
         currentMarker = L.circleMarker([0, 0], {radius: 8, color: '#0A84FF', fillColor: '#0A84FF', fillOpacity: 1}).addTo(map);
     }
 
-    // --- GPS LOGIC (FILTERED) ---
     function startGlobalWatcher() {
         watchID = navigator.geolocation.watchPosition(pos => {
             const { latitude: lat, longitude: lng, accuracy } = pos.coords;
             if(currentMarker) currentMarker.setLatLng([lat, lng]);
             updateGpsIcon(accuracy);
-
             if (accuracy > 35) return; 
 
             if (!lastCoords) { 
@@ -354,7 +351,6 @@
                 const dLon = (lng - lastCoords.lng) * Math.PI/180;
                 const a = Math.sin(dLat/2)**2 + Math.cos(lastCoords.lat * Math.PI/180) * Math.cos(lat * Math.PI/180) * Math.sin(dLon/2)**2;
                 const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-                
                 const timeDiff = (pos.timestamp - lastCoords.timestamp) / 1000;
                 const speedKmh = d / (timeDiff / 3600);
 
@@ -375,7 +371,6 @@
         }, null, {enableHighAccuracy: true, maximumAge: 0, timeout: 5000});
     }
 
-    // --- START/STOP ---
     function startRide() {
         isPausedManually = false;
         requestWakeLock();
@@ -411,35 +406,28 @@
         }
     };
 
-   document.getElementById('stopBtn').onclick = async () => {
-    if(!confirm("Finish and Save?")) return;
-    pauseRide();
-    
-    // Capture the distance before clearing it
-    const finalDist = sessionDistance.toFixed(2);
-    
-    const tx = db.transaction("rides", "readwrite");
-    tx.objectStore("rides").add({ 
-        date: document.getElementById('fullDate').innerText, 
-        distance: finalDist, 
-        duration: document.getElementById('timer').innerText, 
-        pace: document.getElementById('pace').innerText, 
-        location: rideLocation, 
-        route: ridePath 
-    }).onsuccess = () => {
-        localStorage.removeItem('chan_session_dist');
-        localStorage.removeItem('chan_session_seconds');
-        localStorage.removeItem('chan_session_path');
-        recalculateTotal();
-        
-        // --- UPDATED VOICE COMMAND ---
-        speak(`Ride Saved. Well Done. You rode ${finalDist} kilometers.`);
-        
-        setTimeout(() => location.reload(), 2500); // Increased delay so you can hear the speech
+    document.getElementById('stopBtn').onclick = async () => {
+        if(!confirm("Finish and Save?")) return;
+        pauseRide();
+        const finalDist = sessionDistance.toFixed(2);
+        const tx = db.transaction("rides", "readwrite");
+        tx.objectStore("rides").add({ 
+            date: document.getElementById('fullDate').innerText, 
+            distance: finalDist, 
+            duration: document.getElementById('timer').innerText, 
+            pace: document.getElementById('pace').innerText, 
+            location: rideLocation, 
+            route: ridePath 
+        }).onsuccess = () => {
+            localStorage.removeItem('chan_session_dist');
+            localStorage.removeItem('chan_session_seconds');
+            localStorage.removeItem('chan_session_path');
+            recalculateTotal();
+            speak(`Ride Saved. Well Done. You rode ${finalDist} kilometers.`);
+            setTimeout(() => location.reload(), 2500);
+        };
     };
-};
 
-    // --- UI UPDATES ---
     function updateDisplay() {
         document.getElementById('distance').innerText = sessionDistance.toFixed(2);
         let cur = totalDistance + (isPausedManually ? 0 : sessionDistance);
@@ -470,6 +458,19 @@
         };
     }
 
+    // --- PDF EXPORT FIX ---
+    document.getElementById('exportPdf').onclick = () => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        doc.setFontSize(18); doc.text("CHANTHIRAN RIDE REPORT", 14, 20);
+        const tx = db.transaction("rides", "readonly");
+        tx.objectStore("rides").getAll().onsuccess = (e) => {
+            const data = e.target.result.map(r => [r.date, r.location, r.distance + " KM", r.duration]);
+            doc.autoTable({ startY: 30, head: [['Date', 'Location', 'Distance', 'Time']], body: data, theme: 'striped' });
+            doc.save(`Rides_Report_${new Date().toLocaleDateString()}.pdf`);
+        };
+    };
+
     // --- BUTTONS ---
     document.getElementById('newRideBtn').onclick = () => { 
         speak("New Ride. Ride for health.");
@@ -493,7 +494,7 @@
         location.reload();
     };
 
-    // --- HISTORY ---
+    // --- HISTORY RENDERING WITH PENCIL ---
     function renderHistory() {
         const tx = db.transaction("rides", "readonly");
         tx.objectStore("rides").getAll().onsuccess = (e) => {
@@ -509,22 +510,33 @@
             });
             rides.reverse().forEach(ride => {
                 const row = document.createElement('div'); row.className = "history-item";
-                row.innerHTML = `<div style="flex:1"><strong>${ride.date}</strong> | <small>${ride.location}</small><br><span style="color:var(--neon-green); font-weight:800;">${ride.distance} KM</span></div><div style="display:flex; gap:15px;"><span class="material-icons-round" onclick="deleteRide(${ride.id})" style="color:var(--danger-red); font-size:20px; cursor:pointer;">delete</span></div>`;
+                row.innerHTML = `
+                    <div style="flex:1">
+                        <strong>${ride.date}</strong> | <small>${ride.location}</small><br>
+                        <span style="color:var(--neon-green); font-weight:800;">${ride.distance} KM</span>
+                    </div>
+                    <div style="display:flex; gap:15px;">
+                        <span class="material-icons-round" onclick="editRide(${ride.id})" style="color:var(--warning-yellow); font-size:20px; cursor:pointer;">edit</span>
+                        <span class="material-icons-round" onclick="deleteRide(${ride.id})" style="color:var(--danger-red); font-size:20px; cursor:pointer;">delete</span>
+                    </div>`;
                 list.appendChild(row);
             });
         };
     }
 
-    window.deleteRide = (id) => { if(confirm("Delete?")) db.transaction("rides", "readwrite").objectStore("rides").delete(id).onsuccess = () => { renderHistory(); recalculateTotal(); }; };
-
-    document.getElementById('addManualRide').onclick = () => {
-        document.getElementById('manualTitle').innerText = "MANUAL ENTRY";
-        document.getElementById('editRideId').value = "";
-        document.getElementById('manualDate').value = new Date().toISOString().split('T')[0];
-        document.getElementById('manualLoc').value = "";
-        document.getElementById('manualDist').value = "";
-        document.getElementById('manualTime').value = "00:00:00";
-        document.getElementById('manualEntryModal').style.display = 'flex';
+    // --- EDIT LOGIC RESTORED ---
+    window.editRide = (id) => {
+        db.transaction("rides", "readonly").objectStore("rides").get(id).onsuccess = (e) => {
+            const r = e.target.result;
+            document.getElementById('manualTitle').innerText = "EDIT RIDE";
+            document.getElementById('editRideId').value = r.id;
+            const parts = r.date.split('/');
+            document.getElementById('manualDate').value = `${parts[2]}-${parts[1]}-${parts[0]}`;
+            document.getElementById('manualLoc').value = r.location;
+            document.getElementById('manualDist').value = r.distance;
+            document.getElementById('manualTime').value = r.duration;
+            document.getElementById('manualEntryModal').style.display = 'flex';
+        };
     };
 
     document.getElementById('saveManualBtn').onclick = () => {
@@ -541,6 +553,18 @@
         const action = id ? store.put({...data, id: parseInt(id)}) : store.add(data);
         action.onsuccess = () => { document.getElementById('manualEntryModal').style.display = 'none'; recalculateTotal(); renderHistory(); };
     };
+
+    document.getElementById('addManualRide').onclick = () => {
+        document.getElementById('manualTitle').innerText = "MANUAL ENTRY";
+        document.getElementById('editRideId').value = "";
+        document.getElementById('manualDate').value = new Date().toISOString().split('T')[0];
+        document.getElementById('manualLoc').value = "";
+        document.getElementById('manualDist').value = "";
+        document.getElementById('manualTime').value = "00:00:00";
+        document.getElementById('manualEntryModal').style.display = 'flex';
+    };
+
+    window.deleteRide = (id) => { if(confirm("Delete?")) db.transaction("rides", "readwrite").objectStore("rides").delete(id).onsuccess = () => { renderHistory(); recalculateTotal(); }; };
 
     // --- POCKET LOCK ---
     const lockOverlay = document.getElementById('pocketLock'), unlockBtn = document.getElementById('unlockBtn');
